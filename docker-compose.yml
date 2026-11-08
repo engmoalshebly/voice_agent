@@ -1,0 +1,8 @@
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --dev --bind 0.0.0.0 --node-ip 127.0.0.1 --rtc.udp_port.start 17982 --rtc.udp_port.end 17982
+    ports:
+      - "127.0.0.1:17980:7880"
+      - "127.0.0.1:17981:7881"
+      - "127.0.0.1:17982:17982/udp"
