@@ -1,0 +1,206 @@
+"""Single, validated source of runtime configuration.
+
+Every entrypoint calls ``load_settings()`` once at start-up so a missing or
+malformed value fails fast with a clear message instead of mid-call.
+"""
+from __future__ import annotations
+
+import os
+import math
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Literal, Mapping
+from urllib.parse import urlsplit
+
+from dotenv import load_dotenv
+
+Mode = Literal["cascade", "live", "pipeline"]
+VoiceProvider = Literal["openai", "gemini"]
+
+
+class ConfigError(ValueError):
+    """Raised when the environment cannot produce a usable configuration."""
+
+
+@dataclass(frozen=True)
+class LiveKitSettings:
+    url: str
+    api_key: str
+    api_secret: str
+    agent_name: str = ""
+
+
+@dataclass(frozen=True)
+class DaraiSettings:
+    base_url: str
+    api_key: str
+    request_timeout: float = 75.0
+    connect_timeout: float = 15.0
+
+
+@dataclass(frozen=True)
+class ModelSettings:
+    mode: Mode = "cascade"
+    voice_provider: VoiceProvider = "openai"
+    google_api_key: str = ""
+    openai_api_key: str = ""
+    router_model: str = "gemini-2.5-flash"
+    chat_model: str = "gemini-2.5-flash"
+    live_model: str = "gemini-2.5-flash-native-audio-preview-12-2025"
+    gemini_tts_model: str = "gemini-2.5-flash-preview-tts"
+    gemini_voice: str = "Kore"
+    openai_stt_model: str = "gpt-4o-transcribe"
+    openai_tts_model: str = "gpt-4o-mini-tts"
+    openai_voice: str = "marin"
+
+
+@dataclass(frozen=True)
+class WebSettings:
+    host: str = "127.0.0.1"
+    port: int = 8000
+    origin: str = ""
+    token_ttl_minutes: int = 10
+    tokens_per_minute: int = 6
+    trust_proxy: bool = False
+    static_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parents[3] / "web" / "dist")
+
+
+@dataclass(frozen=True)
+class TurnSettings:
+    detector: str = "v1-mini"
+    interruption: str = "vad"
+    min_delay: float = 0.3
+    max_delay: float = 2.5
+    settle_delay: float = 0.3
+    notice_delay: float = 6.0
+    away_timeout: float = 15.0
+
+
+def turn_settings(env: Mapping[str, str]) -> TurnSettings:
+    def number(name: str, default: float) -> float:
+        try:
+            value = float(_env(env, name, str(default)))
+        except ValueError as exc:
+            raise ConfigError(f"{name} must be a number") from exc
+        if not math.isfinite(value) or value <= 0:
+            raise ConfigError(f"{name} must be finite and positive")
+        return value
+
+    detector = _env(env, "VOICE_TURN_DETECTOR", "v1-mini")
+    interruption = _env(env, "VOICE_INTERRUPTION_MODE", "vad")
+    if detector not in ("v1-mini", "vad"):
+        raise ConfigError("VOICE_TURN_DETECTOR must be v1-mini or vad")
+    if interruption not in ("vad", "adaptive"):
+        raise ConfigError("VOICE_INTERRUPTION_MODE must be vad or adaptive")
+    if interruption == "adaptive":
+        _require(env, "LIVEKIT_INFERENCE_API_KEY")
+        _require(env, "LIVEKIT_INFERENCE_API_SECRET")
+    settings = TurnSettings(
+        detector=detector, interruption=interruption,
+        min_delay=number("VOICE_MIN_ENDPOINT_DELAY", 0.3),
+        max_delay=number("VOICE_MAX_ENDPOINT_DELAY", 2.5),
+        settle_delay=number("VOICE_SETTLE_DELAY", 0.3),
+        notice_delay=number("VOICE_NOTICE_DELAY", 6.0),
+        away_timeout=number("VOICE_AWAY_TIMEOUT", 15.0),
+    )
+    if settings.min_delay > settings.max_delay:
+        raise ConfigError("VOICE_MIN_ENDPOINT_DELAY must not exceed VOICE_MAX_ENDPOINT_DELAY")
+    return settings
+
+
+def _env(env: Mapping[str, str], name: str, default: str = "") -> str:
+    return (env.get(name) or default).strip()
+
+
+def _require(env: Mapping[str, str], name: str) -> str:
+    value = _env(env, name)
+    if not value or value == "replace_me":
+        raise ConfigError(f"{name} is required")
+    return value
+
+
+def _int(env: Mapping[str, str], name: str, default: int, minimum: int = 1) -> int:
+    raw = _env(env, name, str(default))
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ConfigError(f"{name} must be an integer") from exc
+    if value < minimum:
+        raise ConfigError(f"{name} must be >= {minimum}")
+    return value
+
+
+def livekit_settings(env: Mapping[str, str]) -> LiveKitSettings:
+    url = _require(env, "LIVEKIT_URL")
+    parts = urlsplit(url)
+    if parts.scheme not in {"ws", "wss"} or not parts.netloc:
+        raise ConfigError("LIVEKIT_URL must be a ws:// or wss:// URL")
+    return LiveKitSettings(
+        url=url,
+        api_key=_require(env, "LIVEKIT_API_KEY"),
+        api_secret=_require(env, "LIVEKIT_API_SECRET"),
+        agent_name=_env(env, "LIVEKIT_AGENT_NAME"),
+    )
+
+
+def darai_settings(env: Mapping[str, str]) -> DaraiSettings:
+    base = _require(env, "DARAI_BASE_URL").rstrip("/")
+    parts = urlsplit(base)
+    if parts.scheme != "https" or not parts.netloc:
+        raise ConfigError("DARAI_BASE_URL must be an HTTPS URL")
+    return DaraiSettings(base_url=base, api_key=_require(env, "DARAI_API_KEY"))
+
+
+def model_settings(env: Mapping[str, str]) -> ModelSettings:
+    mode = _env(env, "VOICE_MODE", "cascade").lower()
+    if mode not in ("cascade", "live", "pipeline"):
+        raise ConfigError("VOICE_MODE must be cascade, live or pipeline")
+    provider = _env(env, "VOICE_PROVIDER", "openai").lower()
+    if provider not in ("openai", "gemini"):
+        raise ConfigError("VOICE_PROVIDER must be openai or gemini")
+    google_key = _env(env, "GOOGLE_API_KEY")
+    openai_key = _env(env, "OPENAI_API_KEY")
+    # Live mode and the pipeline router both run on Gemini.
+    if not google_key:
+        raise ConfigError("GOOGLE_API_KEY is required")
+    if mode in ("cascade", "pipeline") and provider == "openai" and openai_key in ("", "replace_me"):
+        raise ConfigError("OPENAI_API_KEY is required when VOICE_PROVIDER=openai")
+    defaults = ModelSettings()
+    return ModelSettings(
+        mode=mode,  # type: ignore[arg-type]
+        voice_provider=provider,  # type: ignore[arg-type]
+        google_api_key=google_key,
+        openai_api_key=openai_key,
+        router_model=_env(env, "ROUTER_MODEL", defaults.router_model),
+        chat_model=_env(env, "CHAT_MODEL", defaults.chat_model),
+        live_model=_env(env, "LIVE_MODEL", defaults.live_model),
+        gemini_tts_model=_env(env, "GEMINI_TTS_MODEL", defaults.gemini_tts_model),
+        gemini_voice=_env(env, "GEMINI_VOICE", defaults.gemini_voice),
+        openai_stt_model=_env(env, "OPENAI_STT_MODEL", defaults.openai_stt_model),
+        openai_tts_model=_env(env, "OPENAI_TTS_MODEL", defaults.openai_tts_model),
+        openai_voice=_env(env, "OPENAI_VOICE", defaults.openai_voice),
+    )
+
+
+def web_settings(env: Mapping[str, str]) -> WebSettings:
+    defaults = WebSettings()
+    static = _env(env, "WEB_STATIC_DIR")
+    return WebSettings(
+        host=_env(env, "WEB_HOST", defaults.host),
+        port=_int(env, "WEB_PORT", defaults.port),
+        origin=_env(env, "WEB_ORIGIN").rstrip("/"),
+        token_ttl_minutes=_int(env, "TOKEN_TTL_MINUTES", defaults.token_ttl_minutes),
+        tokens_per_minute=_int(env, "TOKENS_PER_MINUTE", defaults.tokens_per_minute),
+        trust_proxy=_env(env, "TRUST_PROXY").lower() in ("1", "true", "yes"),
+        static_dir=Path(static) if static else defaults.static_dir,
+    )
+
+
+def load_env_file() -> None:
+    """Load ``.env.local`` from the project root without overriding real env."""
+    load_dotenv(Path(__file__).resolve().parents[3] / ".env.local", override=False)
+
+
+def environ() -> Mapping[str, str]:
+    load_env_file()
+    return os.environ

@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Dar AI</title>
+  <desc id="desc">شعار Dar AI بخلفية زرقاء متدرجة</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#0647ad"/>
+      <stop offset=".5" stop-color="#176dcc"/>
+      <stop offset="1" stop-color="#58b9e6"/>
+    </linearGradient>
+    <linearGradient id="roof" x1="0" y1=".5" x2="1" y2=".5">
+      <stop offset="0" stop-color="#0b4eb7"/>
+      <stop offset=".52" stop-color="#53bde9"/>
+      <stop offset="1" stop-color="#0d55bd"/>
+    </linearGradient>
+    <linearGradient id="legs" x1=".5" y1="0" x2=".5" y2="1">
+      <stop offset="0" stop-color="#75c8ed"/>
+      <stop offset="1" stop-color="#1767c8"/>
+    </linearGradient>
+    <radialGradient id="orb">
+      <stop offset="0" stop-color="#fff8d5"/>
+      <stop offset=".48" stop-color="#ffd169"/>
+      <stop offset="1" stop-color="#efa82d"/>
+    </radialGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="54" fill="url(#background)"/>
+  <path d="M156 218v47c0 21 13 31 29 31 17 0 29-13 29-31v-25l42-31 42 31v25c0 18 12 31 29 31 16 0 29-10 29-31v-47L273 158a29 29 0 0 0-34 0z" fill="url(#legs)" opacity=".95"/>
+  <path d="m156 218 83-60a29 29 0 0 1 34 0l83 60v35l-83-60a29 29 0 0 0-34 0l-83 60z" fill="url(#roof)"/>
+  <circle cx="256" cy="247" r="24" fill="url(#orb)" filter="url(#glow)"/>
+  <text x="256" y="357" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="64" font-weight="800" text-anchor="middle" letter-spacing="-2">Dar AI</text>
+</svg>

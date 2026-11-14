@@ -1,0 +1,185 @@
+"""LiveKit agent worker. ``VOICE_MODE=cascade`` (default), ``live`` or ``pipeline``.
+
+Usage: ``voice-agent dev`` / ``voice-agent start`` / ``voice-agent console``.
+"""
+from __future__ import annotations
+
+import logging
+import os
+from functools import partial
+
+from livekit import agents
+from livekit.agents import Agent, AgentServer, AgentSession, JobProcess, MetricsCollectedEvent, RunContext, StopResponse, function_tool, llm
+
+from ..application.persona import bank_instructions
+from ..application.router import TurnRouter
+from ..config import ConfigError, darai_settings, environ, model_settings, turn_settings
+from ..domain.dialogue import DialogueFlow
+from ..domain.phrases import DEFAULT_PHRASES
+from ..domain.speech import spoken_text
+from ..infrastructure import providers
+from ..infrastructure.darai import DaraiClient
+from ..infrastructure.logs import configure_logging
+from ..infrastructure.state import StatePublisher
+
+log = logging.getLogger(__name__)
+
+
+class _FlowAgent(Agent):
+    """Shared wiring: one DialogueFlow per call, closed on exit."""
+
+    def __init__(self, flow_factory, **kwargs):
+        super().__init__(**kwargs)
+        self.flow: DialogueFlow = flow_factory(say=lambda text, **kw: self.speak(text, **kw))
+
+    def speak(self, text: str, *, allow_interruptions: bool = True):
+        return self.session.say(spoken_text(text), allow_interruptions=allow_interruptions)
+
+    async def on_exit(self) -> None:
+        await self.flow.close()
+
+
+class LiveAssistant(_FlowAgent):
+    """A conversational LLM with tools; facts only come from DarAI.
+
+    In cascade mode (default) every word, including DarAI's answer, goes through
+    one TTS voice and is spoken exactly as written."""
+
+    def __init__(self, flow_factory):
+        super().__init__(flow_factory, instructions=bank_instructions())
+
+
+    @function_tool()
+    async def ask_darai(self, context: RunContext, question: str):
+        """Start a lookup. For a corrected request include full context; it replaces the old lookup.
+
+        Args:
+            question: The complete clarified question for DarAI.
+        """
+        self.flow.start(question)
+        raise StopResponse()
+
+    @function_tool()
+    async def cancel_lookup(self):
+        """Stop waiting when the user explicitly cancels. Remote processing may continue."""
+        self.flow.cancel()
+        return "Waiting stopped. Briefly acknowledge; do not claim remote processing was cancelled."
+
+    @function_tool()
+    async def lookup_status(self):
+        """Check status when the user asks if you are still there. Do not start another lookup."""
+        return "Still checking; acknowledge briefly." if self.flow.pending else "No pending lookup."
+
+
+class PipelineAssistant(_FlowAgent):
+    """STT -> router -> DarAI -> TTS, without a conversational LLM."""
+
+    def __init__(self, flow_factory, router: TurnRouter):
+        super().__init__(flow_factory, instructions="")
+        self.router = router
+
+    async def on_user_turn_completed(self, turn_ctx: llm.ChatContext, new_message: llm.ChatMessage) -> None:
+        text = (new_message.text_content or "").strip()
+        if not text:
+            raise StopResponse()
+        decision = await self.router.route(text)
+        if decision.action == "darai":
+            self.flow.start(decision.query)
+            self.router.remember(text, f"[lookup] {decision.query}")
+        else:
+            if decision.action == "cancel":
+                self.flow.cancel()
+                reply = DEFAULT_PHRASES.cancelled
+            elif decision.action == "status":
+                reply = (DEFAULT_PHRASES.still_working if self.flow.pending
+                         else DEFAULT_PHRASES.no_pending_lookup)
+            else:
+                reply = DEFAULT_PHRASES.small_talk if decision.action == "greeting" else decision.reply
+            self.flow.stop_audio()
+            self.speak(reply)
+            self.router.remember(text, reply)
+        raise StopResponse()
+
+
+def _prewarm(proc: JobProcess) -> None:
+    """Pay import/model cost once per process, not on the caller's first second."""
+    from livekit.plugins import google, silero  # noqa: F401
+    bank_instructions()
+    proc.userdata["vad"] = silero.VAD.load()
+
+
+server = AgentServer(
+    setup_fnc=_prewarm,
+    num_idle_processes=int(os.getenv("AGENT_IDLE_PROCESSES", "1")),
+)
+# Empty name = automatic dispatch (dev); a name = explicit dispatch via the token's room config.
+AGENT_NAME = (environ().get("LIVEKIT_AGENT_NAME") or "").strip()
+
+
+@server.rtc_session(agent_name=AGENT_NAME)
+async def entrypoint(ctx: agents.JobContext) -> None:
+    env = environ()
+    models = model_settings(env)
+    turns = turn_settings(env)
+    darai = darai_settings(env)
+    publisher = StatePublisher(lambda: ctx.room.local_participant)
+    flow_factory = partial(DialogueFlow, partial(DaraiClient, darai),
+                           notice_delay=turns.notice_delay, settle_delay=turns.settle_delay,
+                           on_state=publisher.publish)
+
+    if models.mode == "cascade":
+        stt, tts = providers.pipeline_speech(models)
+        session = AgentSession(
+            stt=stt, llm=providers.chat_llm(models), tts=tts, vad=ctx.proc.userdata.get("vad"),
+            turn_handling=providers.turn_handling(turns),
+            user_away_timeout=turns.away_timeout,
+        )
+        assistant: _FlowAgent = LiveAssistant(flow_factory)
+    elif models.mode == "live":
+        # Native-audio model: its own voice for chat, TTS for DarAI answers (two voices).
+        session = AgentSession(llm=providers.realtime_model(models), tts=providers.gemini_tts(models))
+        assistant = LiveAssistant(flow_factory)
+    else:
+        stt, tts = providers.pipeline_speech(models)
+        session = AgentSession(stt=stt, tts=tts, vad=ctx.proc.userdata.get("vad"),
+                               turn_handling=providers.turn_handling(turns),
+                               user_away_timeout=turns.away_timeout)
+        assistant = PipelineAssistant(flow_factory, TurnRouter(providers.router_generate(models)))
+
+    @session.on("user_state_changed")
+    def _user_state(event) -> None:
+        assistant.flow.user_speaking(event.new_state == "speaking")
+        if event.new_state == "away":
+            assistant.flow.user_away()
+
+    @session.on("metrics_collected")
+    def _metrics(event: MetricsCollectedEvent) -> None:
+        m = event.metrics
+        if type(m).__name__ == "VADMetrics":  # fires constantly; keep the audio loop light
+            return
+        fields = {k: round(v, 3) for k in ("ttft", "duration", "ttfb", "end_of_utterance_delay", "transcription_delay")
+                  if isinstance(v := getattr(m, k, None), (int, float)) and v >= 0}
+        log.info("turn metrics %s %s", type(m).__name__, fields, extra={"room": ctx.room.name})
+
+    ctx.add_shutdown_callback(assistant.flow.close)
+    ctx.add_shutdown_callback(publisher.close)
+    log.info("voice session starting", extra={"room": ctx.room.name})
+    assistant.flow.warm()  # DarAI socket opens while the caller hears the greeting
+    await session.start(room=ctx.room, agent=assistant)
+    assistant.speak(DEFAULT_PHRASES.greeting)
+
+
+def main() -> None:
+    configure_logging()
+    env = environ()
+    try:  # fail at boot, not on the first caller
+        model_settings(env)
+        darai_settings(env)
+        turn_settings(env)
+    except ConfigError as exc:
+        raise SystemExit(f"configuration error: {exc}") from None
+    agents.cli.run_app(server)
+
+
+if __name__ == "__main__":
+    main()
