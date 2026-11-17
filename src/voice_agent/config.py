@@ -65,7 +65,8 @@ class ModelSettings:
     router_model: str = "gemini-2.5-flash"
     chat_model: str = "gemini-2.5-flash"
     live_model: str = "gemini-2.5-flash-native-audio-preview-12-2025"
-    gemini_tts_model: str = "gemini-2.5-flash-preview-tts"
+    #: GA and streamed: first sound in ~0.5 s on a call (the 2.5 preview took ~2.2 s).
+    gemini_tts_model: str = "gemini-3.8-flash-tts"
     gemini_voice: str = "Kore"
     openai_stt_model: str = "gpt-4o-transcribe"
     openai_tts_model: str = "gpt-4o-mini-tts"
