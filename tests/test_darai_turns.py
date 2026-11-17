@@ -305,5 +305,6 @@ async def test_the_call_voice_is_elevenlabs_backed_by_the_listening_providers_vo
     voice = providers.call_voice(eleven, base)
     assert isinstance(voice, agents_tts.FallbackAdapter)
     first, second = voice._tts_instances
-    assert type(first).__module__.startswith("livekit.plugins.elevenlabs") and first.capabilities.streaming
-    assert isinstance(second, agents_tts.StreamAdapter)                # quota or outage: the call goes on
+    assert all(isinstance(t, agents_tts.StreamAdapter) for t in (first, second))   # both line by line
+    assert type(first._wrapped_tts).__module__.startswith("livekit.plugins.elevenlabs")
+    assert type(second._wrapped_tts).__module__.startswith("livekit.plugins.openai")  # quota or outage: the call goes on

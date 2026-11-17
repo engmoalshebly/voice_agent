@@ -68,13 +68,13 @@ class LineTokenizer(tokenize.SentenceTokenizer):
 
 
 def spoken_by_line(tts):
-    """Make ``tts`` speak each line as soon as it is complete.
+    """Make ``tts`` synthesize each line as soon as it is complete.
 
-    A streaming TTS already speaks while text arrives and is returned as is;
-    a non-streaming one is wrapped so it synthesizes line by line.
+    Also used for a TTS that can stream text itself: measured on a live call,
+    ElevenLabs' own text stream held a lone sentence (the "one moment" filler)
+    until the next one arrived, exactly the silence this avoids. One request
+    per line still starts in about 0.15 s.
     """
-    if tts.capabilities.streaming:
-        return tts
     return agents_tts.StreamAdapter(tts=tts, sentence_tokenizer=LineTokenizer())
 
 
@@ -90,7 +90,7 @@ def call_voice(m: ModelSettings, base_tts):
     so an outage or an exhausted quota changes the voice instead of ending the call."""
     if m.tts_provider != "elevenlabs":
         return spoken_by_line(base_tts)
-    return agents_tts.FallbackAdapter([elevenlabs_tts(m), spoken_by_line(base_tts)],
+    return agents_tts.FallbackAdapter([spoken_by_line(elevenlabs_tts(m)), spoken_by_line(base_tts)],
                                       max_retry_per_tts=0)
 
 
