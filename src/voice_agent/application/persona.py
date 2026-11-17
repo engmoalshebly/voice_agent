@@ -1,17 +1,18 @@
-"""Shared approved persona and factual capability boundaries."""
+"""Approved persona plus the hard capability limits of this build."""
+from __future__ import annotations
+
+from functools import lru_cache
 from pathlib import Path
+
+PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
 
 VOICE_STYLE = (
     'تحدث بعربية واضحة وبلمسة يمنية خفيفة وطبيعية دون مبالغة. '
     'حافظ على نبرة هادئة وودودة ومهنية وسرعة معتدلة ووقفات قصيرة. '
     'انطق النص المقدم فقط دون إضافة كلمات أو معلومات أو تغيير الأرقام.'
 )
-GREETING = 'أهلاً وسهلاً بك، معك المساعد الصوتي التجريبي لخدمات كاك بنك. كيف أقدر أساعدك؟'
 
-
-def bank_instructions():
-    identity = (Path(__file__).parent / 'prompts' / 'cac_bank_voice.md').read_text(encoding='utf-8')
-    return identity + '\n\n' + '''ضوابط التنفيذ الفعلي لهذه النسخة:
+_LIMITS = '''ضوابط التنفيذ الفعلي لهذه النسخة:
 أمثلة المستند توضح الأسلوب ولا تثبت وجود منتج أو شروطه؛ استعلم من DarAI قبل أي معلومة مصرفية محددة.
 أداة ask_darai هي قناة المعرفة المتاحة، وليست أداة معاملات أو تحقق من الهوية.
 لا توجد أدوات تحويل لموظف أو إرسال رسائل أو إغلاق مكالمة أو تسجيل شكوى أو الوصول إلى الحساب.
@@ -24,5 +25,10 @@ def bank_instructions():
 إذا سأل عن حالة الطلب استخدم lookup_status ولا تبدأ طلباً مكرراً.
 عند التصحيح استخدم ask_darai بالسؤال المصحح والسياق غير الحساس كاملاً.
 إذا ألغى الطلب استخدم cancel_lookup. توقف الانتظار محلياً فقط وقد تستمر المعالجة الخارجية.
-لا تفسر غياب الكلام كطلب بحث جديد ولا تكرر نداءات الصمت من دون إشعار النظام.
-''' + '\nأسلوب الصوت: ' + VOICE_STYLE
+لا تفسر غياب الكلام كطلب بحث جديد ولا تكرر نداءات الصمت من دون إشعار النظام.'''
+
+
+@lru_cache(maxsize=1)
+def bank_instructions() -> str:
+    identity = (PROMPTS / "cac_bank_voice.md").read_text(encoding="utf-8")
+    return f"{identity}\n\n{_LIMITS}\n\nأسلوب الصوت: {VOICE_STYLE}"

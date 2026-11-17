@@ -1,8 +1,34 @@
+# Local, isolated development stack. NOT a production configuration:
+# LiveKit runs in --dev mode with dev keys and loopback-only ICE.
+name: darai-voice-dev
+
 services:
   livekit:
-    image: livekit/livekit-server:latest
+    image: livekit/livekit-server:v1.9.4
     command: --dev --bind 0.0.0.0 --node-ip 127.0.0.1 --rtc.udp_port.start 17982 --rtc.udp_port.end 17982
     ports:
       - "127.0.0.1:17980:7880"
       - "127.0.0.1:17981:7881"
       - "127.0.0.1:17982:17982/udp"
+
+  web:
+    build: .
+    env_file: .env.local
+    environment:
+      LIVEKIT_URL: ws://127.0.0.1:17980
+      WEB_ORIGIN: http://127.0.0.1:8000
+    ports: ["127.0.0.1:8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 15s
+      retries: 3
+    profiles: [full]
+
+  agent:
+    build: .
+    command: ["voice-agent", "start"]
+    env_file: .env.local
+    environment:
+      LIVEKIT_URL: ws://livekit:7880
+    depends_on: [livekit]
+    profiles: [full]

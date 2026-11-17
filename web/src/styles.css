@@ -1,0 +1,173 @@
+@import "tailwindcss";
+
+/* DarAI brand font — same files the main platform ships. */
+@font-face { font-family: "29LT Zarid Slab"; src: url("/fonts/zarid-400.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "29LT Zarid Slab"; src: url("/fonts/zarid-500.ttf") format("truetype"); font-weight: 500 600; font-display: swap; }
+@font-face { font-family: "29LT Zarid Slab"; src: url("/fonts/zarid-700.ttf") format("truetype"); font-weight: 700 800; font-display: swap; }
+
+/* DarAI tokens (mirrors darai_react --t-* palette). */
+:root {
+  --bg: #f9fafb;
+  --surface: #ffffff;
+  --surface-2: #f3f4f6;
+  --line: #e5e7eb;
+  --ink: #111827;
+  --muted: #6b7280;
+  --accent: #0145b2;
+  --accent-2: #0378d4;
+  --accent-light: #65caf4;
+  --accent-ink: #ffffff;
+  --accent-soft: #e6f2fc;
+  --sun: #f39200;
+  --sun-soft: rgba(243, 146, 0, 0.12);
+  --ok: #059669;
+  --warn: #b45309;
+  --danger: #dc2626;
+  --glow: 1 69 178;
+  --sun-glow: 243 146 0;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111827; --surface: #1a2332; --surface-2: #243247; --line: #2d3d52;
+    --ink: #f3f4f6; --muted: #9ca3af; --accent: #5ba8d9; --accent-2: #4b96c7;
+    --accent-light: #8dc8eb; --accent-ink: #0b1626; --accent-soft: rgba(91, 168, 217, 0.12);
+    --sun: #f3a630; --sun-soft: rgba(243, 146, 0, 0.14); --ok: #34d399; --warn: #fbbf24; --danger: #f87171;
+    --glow: 91 168 217; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111827; --surface: #1a2332; --surface-2: #243247; --line: #2d3d52;
+  --ink: #f3f4f6; --muted: #9ca3af; --accent: #5ba8d9; --accent-2: #4b96c7;
+  --accent-light: #8dc8eb; --accent-ink: #0b1626; --accent-soft: rgba(91, 168, 217, 0.12);
+  --sun: #f3a630; --sun-soft: rgba(243, 146, 0, 0.14); --ok: #34d399; --warn: #fbbf24; --danger: #f87171;
+  --glow: 91 168 217; color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-accent-light: var(--accent-light);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-sun: var(--sun);
+  --color-sun-soft: var(--sun-soft);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --font-sans: "29LT Zarid Slab", system-ui, sans-serif;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 3px; border-radius: 12px; }
+
+/* Fixed DarAI blues so white text keeps contrast in both themes. */
+.brand-gradient { background-image: linear-gradient(135deg, #0145b2, #0378d4 65%, #3aa8e4); }
+.brand-text { background-image: linear-gradient(135deg, var(--accent), var(--accent-2) 55%, var(--accent-light)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.brand-backdrop {
+  background:
+    radial-gradient(ellipse 60% 45% at 50% 38%, rgb(var(--glow) / 0.10), transparent 70%),
+    radial-gradient(ellipse 30% 25% at 50% 48%, rgb(var(--sun-glow) / 0.07), transparent 70%),
+    var(--bg);
+}
+
+/* --- Voice emblem ---------------------------------------------------
+   A glass disc holding the DarAI mark. Rings scale with --level (live audio
+   0..1), so movement is always real sound; the orbit arc means "searching". */
+.voice-emblem { --level: 0; --core: 56%; }
+.voice-emblem > * { position: absolute; border-radius: 9999px; }
+
+.ve-aura {
+  inset: 4%;
+  background: radial-gradient(circle, rgb(var(--glow) / .20) 0%, rgb(var(--glow) / .06) 45%, transparent 70%);
+  transform: scale(calc(.9 + var(--level) * .35));
+  transition: transform 160ms ease-out, opacity 400ms;
+  opacity: .7;
+}
+.ve-ring {
+  inset: calc((100% - var(--core)) / 2);
+  border: 1.5px solid rgb(var(--glow) / .28);
+  transition: transform 180ms ease-out, opacity 300ms, border-color 400ms;
+}
+.ve-ring-1 { transform: scale(calc(1.08 + var(--level) * .16)); opacity: calc(.55 + var(--level) * .45); }
+.ve-ring-2 { transform: scale(calc(1.22 + var(--level) * .30)); opacity: calc(.32 + var(--level) * .5); transition-delay: 40ms; }
+.ve-ring-3 { transform: scale(calc(1.38 + var(--level) * .46)); opacity: calc(.16 + var(--level) * .45); transition-delay: 80ms; }
+
+.ve-orbit {
+  inset: calc((100% - var(--core)) / 2 - 10px);
+  background: conic-gradient(from 0deg, transparent 0 62%, #65caf4 78%, #0378d4 90%, #f39200 99%, transparent 100%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+          mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+  opacity: 0;
+  transition: opacity 300ms;
+}
+
+.ve-core {
+  inset: calc((100% - var(--core)) / 2);
+  display: grid; place-items: center; overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgb(255 255 255 / .95), rgb(255 255 255 / 0) 60%),
+    linear-gradient(180deg, var(--surface), var(--accent-soft));
+  border: 1px solid rgb(var(--glow) / .18);
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / .8) inset,
+    0 -10px 30px rgb(var(--glow) / .08) inset,
+    0 24px 60px -18px rgb(var(--glow) / .45),
+    0 0 0 calc(var(--level) * 10px) rgb(var(--glow) / .07);
+  transform: scale(calc(1 + var(--level) * .035));
+  transition: transform 140ms ease-out, box-shadow 200ms;
+}
+.ve-sheen {
+  position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(135deg, rgb(255 255 255 / .55), transparent 40%);
+  mix-blend-mode: soft-light;
+}
+.ve-mark { position: relative; width: 60%; margin-top: -2%; filter: drop-shadow(0 6px 10px rgb(var(--glow) / .25)); }
+.ve-mark .mark-sun {
+  filter: drop-shadow(0 0 calc(4px + var(--level) * 14px) rgb(var(--sun-glow) / calc(.45 + var(--level) * .5)));
+  transform-box: fill-box; transform-origin: center;
+  transform: scale(calc(1 + var(--level) * .22));
+  transition: transform 140ms ease-out, filter 140ms ease-out;
+}
+
+/* States */
+[data-agent="idle"] .ve-ring, [data-agent="connecting"] .ve-ring { border-color: rgb(var(--glow) / .16); }
+[data-agent="idle"] .ve-ring-1 { animation: idle-breathe 4.5s ease-in-out infinite; }
+[data-agent="listening"] .ve-ring { border-color: rgb(var(--glow) / .38); }
+[data-agent="speaking"] .ve-ring { border-color: rgb(var(--glow) / .5); }
+[data-agent="speaking"] .ve-aura { opacity: 1; }
+[data-agent="thinking"] .ve-orbit,
+[data-agent="connecting"] .ve-orbit { opacity: 1; animation: orbit 1.6s linear infinite; }
+[data-agent="thinking"] .mark-sun { animation: sun-pulse 1.6s ease-in-out infinite; }
+@keyframes orbit { to { transform: rotate(360deg); } }
+@keyframes idle-breathe { 50% { transform: scale(1.14); opacity: .8; } }
+@keyframes sun-pulse { 50% { transform: scale(1.18); } }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .ve-core {
+    background: radial-gradient(120% 90% at 50% 0%, rgb(255 255 255 / .10), transparent 60%), linear-gradient(180deg, #1f2b3d, #16202f);
+    border-color: rgb(var(--glow) / .25);
+    box-shadow: 0 1px 0 rgb(255 255 255 / .06) inset, 0 24px 60px -18px rgb(0 0 0 / .6), 0 0 0 calc(var(--level) * 10px) rgb(var(--glow) / .10);
+  }
+}
+
+.fade-in { animation: fade-in 280ms cubic-bezier(.2,.8,.2,1) both; }
+@keyframes fade-in { from { opacity: 0; transform: translateY(6px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
