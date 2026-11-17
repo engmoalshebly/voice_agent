@@ -37,6 +37,31 @@ def without_acknowledgement(sentence: str) -> str:
     return trimmed or sentence
 
 
+#: A welcome at the start of an answer. The call was already welcomed, so it
+#: is only kept when the caller greeted first.
+_WELCOME = re.compile(
+    # A standalone welcome phrase: it must end at punctuation, so "أهلاً
+    # بالأبطال في برنامجنا" (not addressed to the caller) is left alone.
+    r"^\s*(?:(?:أهلاً|أهلا|اهلاً|اهلا)(?:\s+وسهلاً|\s+وسهلا)?|مرحباً|مرحبا)(?:\s+(?:بك|فيك))?\s*[،,.!]+\s*")
+_CALLER_GREETING = re.compile(r"سلام|مرحب|أهل|اهل|صباح|مساء|كيف\s*(?:حالك|الحال|اصبحت|أصبحت)|هلا")
+#: "4×6" is read as "four times six" or not at all; a caller hears "أربعة في ستة".
+_SIZE = re.compile(r"(\d+)\s*[×xX*]\s*(\d+)")
+
+
+def spoken_answer(sentence: str, *, first: bool, after_filler: bool, caller_text: str) -> str:
+    """What is actually said for a sentence of DarAI's answer.
+
+    The model is asked for all of this; these are the safeguards for when it
+    does not comply, because every miss is heard.
+    """
+    text = _SIZE.sub(r"\1 في \2", sentence)
+    if first and not _CALLER_GREETING.search(caller_text or ""):
+        text = _WELCOME.sub("", text, count=1).strip() or text
+    if first and after_filler:
+        text = without_acknowledgement(text)
+    return text
+
+
 def last_user_message(chat_ctx: llm.ChatContext) -> tuple[str, str]:
     """(text, item id) of what the visitor just said, or ("", "")."""
     for item in reversed(chat_ctx.items):
@@ -122,13 +147,12 @@ class DaraiLLMStream(llm.LLMStream):
                     break
                 pending = asyncio.ensure_future(events.__anext__())
                 if event.kind == "sentence":
-                    text_out = event.text
-                    if first_ms is None:
+                    first = first_ms is None
+                    if first:
                         first_ms = (time.monotonic() - started) * 1000
-                        if filler_said:
-                            text_out = without_acknowledgement(text_out)
                     answered = True
-                    self._say(request_id, text_out)
+                    self._say(request_id, spoken_answer(event.text, first=first, after_filler=filler_said,
+                                                        caller_text=text))
                 elif event.kind == "replace":
                     answered = True
                     self._say(request_id, f"{owner._phrases.correction} {event.text}")

@@ -397,3 +397,31 @@ async def test_after_a_filler_the_answer_does_not_echo_it():
 async def test_without_a_filler_the_answer_is_spoken_as_written():
     turns = FakeTurns([(0, TurnEvent("sentence", text="أكيد، تقدر تفتح حساب.")), (0, TurnEvent("end", reason="answered"))])
     assert await _speak(turns, filler_delay=0.5) == ["أكيد، تقدر تفتح حساب."]
+
+
+# -- safeguards on what is said -----------------------------------------------
+
+@pytest.mark.parametrize("sentence, caller, expected", [
+    ("أهلاً بك. تقدر تفتح حساب جاري.", "كيف أفتح حساب؟", "تقدر تفتح حساب جاري."),
+    ("أهلاً وسهلاً بك، نقدم خدمات كثيرة.", "ايش خدماتكم؟", "نقدم خدمات كثيرة."),
+    ("مرحباً بك! الدوام من الثامنة.", "متى الدوام؟", "الدوام من الثامنة."),
+    ("وعليكم السلام، أهلاً بك.", "السلام عليكم", "وعليكم السلام، أهلاً بك."),   # the caller greeted
+    ("أهلاً بك، كيف أخدمك؟", "مرحبا", "أهلاً بك، كيف أخدمك؟"),
+    ("أهلاً بك.", "متى الدوام؟", "أهلاً بك."),                                 # nothing would be left
+    ("أهلاً بالأبطال في برنامجنا.", "ايش برامجكم؟", "أهلاً بالأبطال في برنامجنا."),  # not a welcome to the caller
+])
+def test_a_repeated_welcome_is_dropped_unless_the_caller_greeted(sentence, caller, expected):
+    from voice_agent.infrastructure.darai_llm import spoken_answer
+
+    assert spoken_answer(sentence, first=True, after_filler=False, caller_text=caller) == expected
+
+
+def test_only_the_first_sentence_is_trimmed_and_sizes_are_spoken():
+    from voice_agent.infrastructure.darai_llm import spoken_answer
+
+    later = spoken_answer("أهلاً بك في أي وقت.", first=False, after_filler=True, caller_text="شكراً")
+    assert later == "أهلاً بك في أي وقت."
+    assert spoken_answer("صورتين 4×6 وصورة 3 x 4.", first=False, after_filler=False, caller_text="") == \
+        "صورتين 4 في 6 وصورة 3 في 4."
+    assert spoken_answer("أكيد، أهلاً بك. المطلوب الهوية.", first=True, after_filler=True, caller_text="ايش المطلوب") \
+        == "أهلاً بك. المطلوب الهوية."   # one trim per kind, welcome only at the very start
