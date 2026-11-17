@@ -31,6 +31,14 @@ class TurnEvent:
     reason: str = ""     # for end: answered | no_reply | silent | timeout
 
 
+@dataclass(frozen=True)
+class CallSession:
+    """Who a call speaks for. Every field may be empty."""
+    organization: str = ""
+    greeting: str = ""
+    stt_hints: tuple[str, ...] = ()
+
+
 class DaraiTurnError(RuntimeError):
     def __init__(self, message: str, status: Optional[int] = None):
         super().__init__(message)
@@ -97,6 +105,34 @@ class DaraiTurnClient:
         except TimeoutError as exc:
             raise DaraiTurnError("DarAI turn timed out") from exc
         raise DaraiTurnError("DarAI closed the turn without an end")
+
+    async def session(self, visitor_token: str) -> CallSession:
+        """Fetch the call's greeting and listening hints once, at the start.
+
+        Never raises: a call must start with neutral defaults rather than
+        not at all.
+        """
+        headers = {"Authorization": f"Bearer {visitor_token}", "X-Voice-Worker-Key": self._settings.worker_key}
+        try:
+            async with self._http().post(
+                self._settings.url + "/ws/voice/session", headers=headers,
+                timeout=aiohttp.ClientTimeout(total=3.0, connect=self._settings.connect_timeout),
+            ) as response:
+                if response.status != 200:
+                    log.warning("DarAI call session unavailable (%s)", response.status)
+                    return CallSession()
+                data = await response.json()
+        except Exception as exc:
+            log.warning("DarAI call session unavailable (%s)", type(exc).__name__)
+            return CallSession()
+        if not isinstance(data, dict):
+            return CallSession()
+        hints = data.get("stt_hints") if isinstance(data.get("stt_hints"), list) else []
+        return CallSession(
+            organization=str(data.get("organization") or "").strip(),
+            greeting=str(data.get("greeting") or "").strip(),
+            stt_hints=tuple(str(h).strip() for h in hints if str(h).strip())[:24],
+        )
 
     async def close(self) -> None:
         if self._session is not None and self._owns_session:

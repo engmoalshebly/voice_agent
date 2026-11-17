@@ -25,9 +25,14 @@ class Phrases:
     # -- darai mode: DarAI answers; these only cover what it cannot say itself --
     #: Spoken once when a reply is taking a moment. Short, and rotated.
     fillers: tuple[str, ...] = field(default_factory=lambda: (
-        'لحظة من فضلك.',
-        'تمام، ثواني.',
-        'حاضر، لحظة.',
+        'تمام.',
+        'طيب.',
+        'حاضر.',
+        'أكيد.',
+        'لحظة.',
+        'خلني أشوف.',
+        'ثواني بس.',
+        'تمام، لحظة.',
     ))
     correction: str = 'عفواً، للتوضيح:'
     turn_failed: str = 'أعتذر منك، حصل خلل بسيط. ممكن تعيد ما قلته؟'

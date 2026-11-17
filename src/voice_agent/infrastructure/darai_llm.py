@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
+import random
 import time
 import uuid
 from typing import Any
@@ -40,7 +41,8 @@ class DaraiLLM(llm.LLM):
         self._phrases = phrases
         self._filler_delay = filler_delay
         self._call_id = call_id or uuid.uuid4().hex[:12]
-        self._fillers_used = 0
+        self._last_filler: str | None = None
+        self._random = random.Random()
 
     @property
     def model(self) -> str:
@@ -51,10 +53,11 @@ class DaraiLLM(llm.LLM):
         return "darai"
 
     def next_filler(self) -> str:
-        fillers = self._phrases.fillers
-        phrase = fillers[self._fillers_used % len(fillers)]
-        self._fillers_used += 1
-        return phrase
+        """A short acknowledgement, never the one said last: repeating the same
+        words every turn is what makes a call sound machine-made."""
+        choices = [p for p in self._phrases.fillers if p != self._last_filler] or list(self._phrases.fillers)
+        self._last_filler = self._random.choice(choices)
+        return self._last_filler
 
     def chat(self, *, chat_ctx: llm.ChatContext, tools: list[Any] | None = None,
              conn_options: Any = None, **_: Any) -> "DaraiLLMStream":

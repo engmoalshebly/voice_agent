@@ -94,6 +94,21 @@ def call_voice(m: ModelSettings, base_tts):
                                       max_retry_per_tts=0)
 
 
+def stt_prompt_for(organization: str, hints) -> str:
+    """The neutral prompt, plus the names this call's callers will say.
+
+    Speech recognition writes an unfamiliar brand as the nearest ordinary
+    word ("تاك بنك" for "كاك بنك"); naming it once is enough to prevent that.
+    """
+    names = [h for h in dict.fromkeys(str(h).strip() for h in (hints or ())) if h]
+    if not names:
+        return NEUTRAL_STT_PROMPT
+    who = f"مع {organization}" if organization else ""
+    return (f"مكالمة خدمة عملاء صوتية {who} بالعربية، بلهجة محلية أو فصحى. ".replace("  ", " ")
+            + "أسماء ومصطلحات قد يذكرها المتصل: " + "، ".join(names) + ". "
+            + "اكتب كلام المتصل كما قاله بالعربية دون ترجمة أو تلخيص.")
+
+
 def pipeline_speech(m: ModelSettings, stt_prompt: str = STT_PROMPT, *, realtime_stt: bool = False):
     if m.voice_provider == "openai":
         return (openai.STT(model=m.openai_stt_model, language="ar", prompt=stt_prompt,

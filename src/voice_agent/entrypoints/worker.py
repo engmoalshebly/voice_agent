@@ -153,8 +153,10 @@ async def _darai_session(ctx: agents.JobContext, env, models, turns) -> None:
 
     phrases = DEFAULT_PHRASES
     client = DaraiTurnClient(gateway)
-    stt, tts = providers.pipeline_speech(models, stt_prompt=providers.NEUTRAL_STT_PROMPT,
-                                         realtime_stt=gateway.realtime_stt)
+    call = await client.session(visitor_token)   # who this call speaks for; never raises
+    stt, tts = providers.pipeline_speech(
+        models, stt_prompt=providers.stt_prompt_for(call.organization, call.stt_hints),
+        realtime_stt=gateway.realtime_stt)
     session = AgentSession(
         stt=stt, tts=providers.call_voice(models, tts), vad=ctx.proc.userdata.get("vad"),
         llm=DaraiLLM(client, visitor_token, phrases, filler_delay=gateway.filler_delay, call_id=ctx.room.name),
@@ -189,7 +191,9 @@ async def _darai_session(ctx: agents.JobContext, env, models, turns) -> None:
     ctx.add_shutdown_callback(_cleanup)
     log.info("voice session starting (darai mode)", extra={"room": ctx.room.name})
     await session.start(room=ctx.room, agent=Agent(instructions=""))
-    session.say(phrases.neutral_greeting)
+    # The welcome message the tenant wrote for this widget, so the call opens
+    # the way the chat does.
+    session.say(call.greeting or phrases.neutral_greeting)
 
 
 @server.rtc_session(agent_name=AGENT_NAME)

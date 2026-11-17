@@ -96,7 +96,7 @@ class TurnSettings:
     detector: str = "v1-mini"
     interruption: str = "vad"
     min_delay: float = 0.3
-    max_delay: float = 2.5
+    max_delay: float = 1.8
     settle_delay: float = 0.3
     notice_delay: float = 6.0
     away_timeout: float = 15.0
@@ -124,7 +124,9 @@ def turn_settings(env: Mapping[str, str]) -> TurnSettings:
     settings = TurnSettings(
         detector=detector, interruption=interruption,
         min_delay=number("VOICE_MIN_ENDPOINT_DELAY", 0.3),
-        max_delay=number("VOICE_MAX_ENDPOINT_DELAY", 2.5),
+        # The ceiling a caller waits when the turn detector is unsure. 2.5 s
+        # was measured on live calls as the slowest part of some turns.
+        max_delay=number("VOICE_MAX_ENDPOINT_DELAY", 1.8),
         settle_delay=number("VOICE_SETTLE_DELAY", 0.3),
         notice_delay=number("VOICE_NOTICE_DELAY", 6.0),
         away_timeout=number("VOICE_AWAY_TIMEOUT", 15.0),

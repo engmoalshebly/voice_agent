@@ -153,7 +153,8 @@ async def test_a_slow_reply_gets_one_short_filler_then_the_answer():
     turns = FakeTurns([(0.15, TurnEvent("sentence", text="الرسوم ألف ريال.")), (0.15, TurnEvent("sentence", text="هل أخدمك بشيء آخر؟")),
                        (0, TurnEvent("end", reason="answered"))])
 
-    assert await _speak(turns, filler_delay=0.05) == [P.fillers[0], "الرسوم ألف ريال.", "هل أخدمك بشيء آخر؟"]
+    spoken = await _speak(turns, filler_delay=0.05)
+    assert spoken[0] in P.fillers and spoken[1:] == ["الرسوم ألف ريال.", "هل أخدمك بشيء آخر؟"]
 
 
 async def test_a_fast_reply_gets_no_filler_and_fillers_rotate_between_turns():
@@ -163,10 +164,12 @@ async def test_a_fast_reply_gets_no_filler_and_fillers_rotate_between_turns():
     slow = [(0.1, TurnEvent("sentence", text="تفضل.")), (0, TurnEvent("end", reason="answered"))]
     model = DaraiLLM(FakeTurns(slow), "t", P, filler_delay=0.02)
     first_fillers = []
-    for _ in range(2):
+    for _ in range(12):
         async with model.chat(chat_ctx=_ctx(("user", "س"))) as stream:
             first_fillers.append([c.delta.content.strip() async for c in stream][0])
-    assert first_fillers == [P.fillers[0], P.fillers[1]]
+    assert all(f in P.fillers for f in first_fillers)
+    assert all(a != b for a, b in zip(first_fillers, first_fillers[1:]))   # never the same twice running
+    assert len(set(first_fillers)) > 2                                     # and not a short fixed cycle
 
 
 async def test_a_replacement_is_introduced_as_a_correction():
@@ -308,3 +311,60 @@ async def test_the_call_voice_is_elevenlabs_backed_by_the_listening_providers_vo
     assert all(isinstance(t, agents_tts.StreamAdapter) for t in (first, second))   # both line by line
     assert type(first._wrapped_tts).__module__.startswith("livekit.plugins.elevenlabs")
     assert type(second._wrapped_tts).__module__.startswith("livekit.plugins.openai")  # quota or outage: the call goes on
+
+
+# -- who the call speaks for --------------------------------------------------
+
+async def test_the_session_brings_the_greeting_and_the_names_to_listen_for():
+    from voice_agent.infrastructure.darai_turns import CallSession
+
+    async def reply(request):
+        return web.json_response({"organization": "كاك بنك", "greeting": "مرحباً بك! كيف نخدمك؟",
+                                  "stt_hints": ["كاك بنك", " ", "كاك بنكي", 7]})
+
+    seen = {}
+
+    async def session(request):
+        seen.update(request.headers)
+        return await reply(request)
+
+    # A server of its own: the fixture's gateway only serves /ws/voice/turn.
+    client = None
+    try:
+        from aiohttp import web as aioweb
+        runner_app = aioweb.Application()
+        runner_app.router.add_post("/ws/voice/session", session)
+        runner = aioweb.AppRunner(runner_app)
+        await runner.setup()
+        site = aioweb.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        client = DaraiTurnClient(GatewaySettings(url=f"http://127.0.0.1:{port}", worker_key="wk"))
+        got = await client.session("visitor-jwt")
+        await runner.cleanup()
+    finally:
+        if client is not None:
+            await client.close()
+
+    assert got == CallSession(organization="كاك بنك", greeting="مرحباً بك! كيف نخدمك؟",
+                              stt_hints=("كاك بنك", "كاك بنكي", "7"))
+    assert seen["Authorization"] == "Bearer visitor-jwt" and seen["X-Voice-Worker-Key"] == "wk"
+
+
+async def test_a_missing_session_never_stops_a_call():
+    from voice_agent.infrastructure.darai_turns import CallSession
+
+    client = DaraiTurnClient(GatewaySettings(url="http://127.0.0.1:9", worker_key="wk", connect_timeout=1))
+    try:
+        assert await client.session("t") == CallSession()
+    finally:
+        await client.close()
+
+
+def test_the_listening_prompt_names_the_organisation_and_its_terms():
+    from voice_agent.infrastructure.providers import NEUTRAL_STT_PROMPT, stt_prompt_for
+
+    prompt = stt_prompt_for("كاك بنك", ["كاك بنك", "كاك بنكي", "كاك بنك", ""])
+    assert "مع كاك بنك" in prompt and "كاك بنك، كاك بنكي." in prompt   # once each, in order
+    assert stt_prompt_for("", []) == NEUTRAL_STT_PROMPT
+    assert "  " not in stt_prompt_for("", ["متجر النور"])
