@@ -44,7 +44,8 @@ fi
 if [[ $what == agent || $what == all ]]; then
   agent_env=()
   if [[ $MODE == darai ]]; then
-    agent_env=(-e "DARAI_GATEWAY_URL=$GATEWAY_INTERNAL_URL" --env-file "$D/gateway-worker.env")
+    agent_env=(-e "DARAI_GATEWAY_URL=$GATEWAY_INTERNAL_URL" --env-file "$D/gateway-worker.env"
+               -e "VOICE_STT_REALTIME=${VOICE_STT_REALTIME:-false}" -e "VOICE_FILLER_DELAY=${VOICE_FILLER_DELAY:-1.2}")
   fi
   docker rm -f darai-voice-agent >/dev/null 2>&1 || true
   # cpu-shares: real-time audio must win CPU contention on this shared 4-core host.

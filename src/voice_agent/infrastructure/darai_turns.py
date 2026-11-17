@@ -5,7 +5,7 @@ model is still writing it:
 
     sentence  say this now
     replace   say this instead of what was said
-    end       the turn is over (answered | silent | timeout)
+    end       the turn is over (answered | no_reply | silent | timeout)
 
 The worker presents two credentials: the visitor's own widget token, which
 says whose conversation this is, and the worker key.
@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 class TurnEvent:
     kind: str            # sentence | replace | end
     text: str = ""
-    reason: str = ""     # for end: answered | silent | timeout
+    reason: str = ""     # for end: answered | no_reply | silent | timeout
 
 
 class DaraiTurnError(RuntimeError):

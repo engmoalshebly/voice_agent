@@ -178,6 +178,7 @@ async def test_a_replacement_is_introduced_as_a_correction():
 
 @pytest.mark.parametrize("script, error, expected", [
     ([(0, TurnEvent("end", reason="silent"))], None, P.no_reply),
+    ([(0, TurnEvent("end", reason="no_reply"))], None, P.with_team),   # the conversation is with the team
     ([(0, TurnEvent("end", reason="timeout"))], None, P.turn_failed),
     ([], DaraiTurnError("refused", 502), P.turn_failed),
 ])

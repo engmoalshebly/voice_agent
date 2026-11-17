@@ -115,7 +115,8 @@ class DaraiLLMStream(llm.LLMStream):
                     reason = event.reason or "answered"
                     break
             if not answered:
-                self._say(request_id, owner._phrases.no_reply if reason == "silent" else owner._phrases.turn_failed)
+                self._say(request_id, {"no_reply": owner._phrases.with_team,
+                                       "silent": owner._phrases.no_reply}.get(reason, owner._phrases.turn_failed))
         except DaraiTurnError as exc:
             reason = f"error:{exc.status or 'transport'}"
             log.warning("DarAI turn failed: %s", exc)

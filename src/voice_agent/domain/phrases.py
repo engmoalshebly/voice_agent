@@ -32,6 +32,8 @@ class Phrases:
     correction: str = 'عفواً، للتوضيح:'
     turn_failed: str = 'أعتذر منك، حصل خلل بسيط. ممكن تعيد ما قلته؟'
     no_reply: str = 'وصلتني رسالتك. إذا ما سمعت رداً، ممكن تعيد طلبك؟'
+    #: The assistant is not answering this conversation: it is with the team.
+    with_team: str = 'وصلت رسالتك لفريقنا، وسيتابع معك أحد الموظفين في أقرب وقت.'
     call_limit: str = 'وصلنا للحد الأقصى لمدة المكالمة. شكراً لتواصلك، ويمكنك الاتصال مرة أخرى في أي وقت.'
     #: Used until the channel's own greeting comes from DarAI.
     neutral_greeting: str = 'أهلاً وسهلاً بك. كيف أقدر أخدمك اليوم؟'
