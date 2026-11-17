@@ -47,7 +47,9 @@ if [[ $what == agent || $what == all ]]; then
   agent_env=()
   if [[ $MODE == darai ]]; then
     agent_env=(-e "DARAI_GATEWAY_URL=$GATEWAY_INTERNAL_URL" --env-file "$D/gateway-worker.env"
-               -e "VOICE_STT_REALTIME=${VOICE_STT_REALTIME:-false}" -e "VOICE_FILLER_DELAY=${VOICE_FILLER_DELAY:-1.2}")
+               -e "VOICE_STT_REALTIME=${VOICE_STT_REALTIME:-false}" -e "VOICE_FILLER_DELAY=${VOICE_FILLER_DELAY:-1.2}"
+               # Provider keys come from DarAI «مفاتيح المزودين» on each call; agent.env keys are the fallback.
+               -e "DARAI_KEYS_URL=${DARAI_KEYS_URL:-http://darai_database_management:5522/api/v1/internal/voice-provider-keys}")
     # Passed only when set here, so the values in agent.env stay in force.
     for name in VOICE_TTS_PROVIDER ELEVENLABS_VOICE_ID ELEVENLABS_MODEL; do
       [[ -n ${!name:-} ]] && agent_env+=(-e "$name=${!name}")
