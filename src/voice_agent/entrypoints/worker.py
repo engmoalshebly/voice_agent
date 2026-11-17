@@ -1,9 +1,11 @@
-"""LiveKit agent worker. ``VOICE_MODE=cascade`` (default), ``live`` or ``pipeline``.
+"""LiveKit agent worker. ``VOICE_MODE=darai`` (DarAI answers; the product mode),
+``cascade`` (default), ``live`` or ``pipeline`` (the earlier demo modes).
 
 Usage: ``voice-agent dev`` / ``voice-agent start`` / ``voice-agent console``.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from functools import partial
@@ -13,12 +15,14 @@ from livekit.agents import Agent, AgentServer, AgentSession, JobProcess, Metrics
 
 from ..application.persona import bank_instructions
 from ..application.router import TurnRouter
-from ..config import ConfigError, darai_settings, environ, model_settings, turn_settings
+from ..config import ConfigError, darai_settings, environ, gateway_settings, model_settings, turn_settings
 from ..domain.dialogue import DialogueFlow
 from ..domain.phrases import DEFAULT_PHRASES
 from ..domain.speech import spoken_text
 from ..infrastructure import providers
 from ..infrastructure.darai import DaraiClient
+from ..infrastructure.darai_llm import DaraiLLM
+from ..infrastructure.darai_turns import DaraiTurnClient
 from ..infrastructure.logs import configure_logging
 from ..infrastructure.state import StatePublisher
 
@@ -116,11 +120,81 @@ server = AgentServer(
 AGENT_NAME = (environ().get("LIVEKIT_AGENT_NAME") or "").strip()
 
 
+#: Set on the visitor's LiveKit token by the token service; never by the browser.
+VISITOR_TOKEN_ATTRIBUTE = "darai.visitor_token"
+
+
+def _log_metrics(session: AgentSession, room_name: str) -> None:
+    @session.on("metrics_collected")
+    def _metrics(event: MetricsCollectedEvent) -> None:
+        m = event.metrics
+        if type(m).__name__ == "VADMetrics":  # fires constantly; keep the audio loop light
+            return
+        fields = {k: round(v, 3) for k in ("ttft", "duration", "ttfb", "end_of_utterance_delay", "transcription_delay")
+                  if isinstance(v := getattr(m, k, None), (int, float)) and v >= 0}
+        log.info("turn metrics %s %s", type(m).__name__, fields, extra={"room": room_name})
+
+
+async def _darai_session(ctx: agents.JobContext, env, models, turns) -> None:
+    """DarAI answers. The worker only hears, speaks and keeps the turn-taking natural."""
+    gateway = gateway_settings(env)
+    await ctx.connect()
+    participant = await ctx.wait_for_participant()
+    visitor_token = (participant.attributes or {}).get(VISITOR_TOKEN_ATTRIBUTE, "").strip()
+    if not visitor_token:
+        # Without it there is no conversation to speak in; do not improvise one.
+        log.error("visitor joined without a DarAI token; ending the call", extra={"room": ctx.room.name})
+        ctx.shutdown(reason="missing visitor token")
+        return
+
+    phrases = DEFAULT_PHRASES
+    client = DaraiTurnClient(gateway)
+    stt, tts = providers.pipeline_speech(models, stt_prompt=providers.NEUTRAL_STT_PROMPT)
+    session = AgentSession(
+        stt=stt, tts=tts, vad=ctx.proc.userdata.get("vad"),
+        llm=DaraiLLM(client, visitor_token, phrases, filler_delay=gateway.filler_delay, call_id=ctx.room.name),
+        turn_handling=providers.turn_handling(turns),
+        user_away_timeout=turns.away_timeout,
+    )
+    away_said = False
+
+    @session.on("user_state_changed")
+    def _user_state(event) -> None:
+        nonlocal away_said
+        if event.new_state == "away" and not away_said:
+            away_said = True
+            session.say(phrases.away)
+        elif event.new_state == "speaking":
+            away_said = False
+
+    async def _limit() -> None:
+        await asyncio.sleep(gateway.max_call_seconds)
+        log.info("call reached its time limit", extra={"room": ctx.room.name})
+        await session.say(phrases.call_limit, allow_interruptions=False)
+        ctx.shutdown(reason="call time limit")
+
+    limit = asyncio.create_task(_limit())
+
+    async def _cleanup() -> None:
+        limit.cancel()
+        await asyncio.gather(limit, return_exceptions=True)
+        await client.close()
+
+    _log_metrics(session, ctx.room.name)
+    ctx.add_shutdown_callback(_cleanup)
+    log.info("voice session starting (darai mode)", extra={"room": ctx.room.name})
+    await session.start(room=ctx.room, agent=Agent(instructions=""))
+    session.say(phrases.neutral_greeting)
+
+
 @server.rtc_session(agent_name=AGENT_NAME)
 async def entrypoint(ctx: agents.JobContext) -> None:
     env = environ()
     models = model_settings(env)
     turns = turn_settings(env)
+    if models.mode == "darai":
+        await _darai_session(ctx, env, models, turns)
+        return
     darai = darai_settings(env)
     publisher = StatePublisher(lambda: ctx.room.local_participant)
     flow_factory = partial(DialogueFlow, partial(DaraiClient, darai),
@@ -152,14 +226,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         if event.new_state == "away":
             assistant.flow.user_away()
 
-    @session.on("metrics_collected")
-    def _metrics(event: MetricsCollectedEvent) -> None:
-        m = event.metrics
-        if type(m).__name__ == "VADMetrics":  # fires constantly; keep the audio loop light
-            return
-        fields = {k: round(v, 3) for k in ("ttft", "duration", "ttfb", "end_of_utterance_delay", "transcription_delay")
-                  if isinstance(v := getattr(m, k, None), (int, float)) and v >= 0}
-        log.info("turn metrics %s %s", type(m).__name__, fields, extra={"room": ctx.room.name})
+    _log_metrics(session, ctx.room.name)
 
     ctx.add_shutdown_callback(assistant.flow.close)
     ctx.add_shutdown_callback(publisher.close)
@@ -173,8 +240,10 @@ def main() -> None:
     configure_logging()
     env = environ()
     try:  # fail at boot, not on the first caller
-        model_settings(env)
-        darai_settings(env)
+        if model_settings(env).mode == "darai":
+            gateway_settings(env)
+        else:
+            darai_settings(env)
         turn_settings(env)
     except ConfigError as exc:
         raise SystemExit(f"configuration error: {exc}") from None

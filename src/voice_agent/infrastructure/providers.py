@@ -37,9 +37,16 @@ STT_PROMPT = (
 )
 
 
-def pipeline_speech(m: ModelSettings):
+#: For darai mode, where the worker serves any tenant and knows no domain terms.
+NEUTRAL_STT_PROMPT = (
+    "مكالمة خدمة عملاء صوتية بالعربية، بلهجة محلية أو فصحى. "
+    "اكتب كلام المتصل كما قاله بالعربية دون ترجمة أو تلخيص."
+)
+
+
+def pipeline_speech(m: ModelSettings, stt_prompt: str = STT_PROMPT):
     if m.voice_provider == "openai":
-        return (openai.STT(model=m.openai_stt_model, language="ar", prompt=STT_PROMPT,
+        return (openai.STT(model=m.openai_stt_model, language="ar", prompt=stt_prompt,
                            temperature=0, api_key=m.openai_api_key),
                 openai.TTS(model=m.openai_tts_model, voice=m.openai_voice, instructions=VOICE_STYLE,
                            api_key=m.openai_api_key))

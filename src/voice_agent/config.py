@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
-Mode = Literal["cascade", "live", "pipeline"]
+Mode = Literal["darai", "cascade", "live", "pipeline"]
 VoiceProvider = Literal["openai", "gemini"]
 
 
@@ -36,6 +36,19 @@ class DaraiSettings:
     api_key: str
     request_timeout: float = 75.0
     connect_timeout: float = 15.0
+
+
+@dataclass(frozen=True)
+class GatewaySettings:
+    """DarAI's realtime gateway, for ``darai`` mode."""
+    url: str
+    worker_key: str
+    connect_timeout: float = 5.0
+    turn_timeout: float = 75.0
+    #: Seconds of silence before a short "one moment" is spoken; 0 disables it.
+    filler_delay: float = 1.2
+    #: Longest call, in seconds. The visitor token is valid for an hour.
+    max_call_seconds: float = 1800.0
 
 
 @dataclass(frozen=True)
@@ -151,19 +164,44 @@ def darai_settings(env: Mapping[str, str]) -> DaraiSettings:
     return DaraiSettings(base_url=base, api_key=_require(env, "DARAI_API_KEY"))
 
 
+def gateway_settings(env: Mapping[str, str]) -> GatewaySettings:
+    url = _require(env, "DARAI_GATEWAY_URL").rstrip("/")
+    parts = urlsplit(url)
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        raise ConfigError("DARAI_GATEWAY_URL must be an http(s) URL")
+    defaults = GatewaySettings(url=url, worker_key="x")
+
+    def number(name: str, default: float, minimum: float) -> float:
+        try:
+            value = float(_env(env, name, str(default)))
+        except ValueError as exc:
+            raise ConfigError(f"{name} must be a number") from exc
+        if not math.isfinite(value) or value < minimum:
+            raise ConfigError(f"{name} must be >= {minimum}")
+        return value
+
+    return GatewaySettings(
+        url=url,
+        worker_key=_require(env, "VOICE_WORKER_KEY"),
+        filler_delay=number("VOICE_FILLER_DELAY", defaults.filler_delay, 0.0),
+        max_call_seconds=number("VOICE_MAX_CALL_SECONDS", defaults.max_call_seconds, 30.0),
+    )
+
+
 def model_settings(env: Mapping[str, str]) -> ModelSettings:
     mode = _env(env, "VOICE_MODE", "cascade").lower()
-    if mode not in ("cascade", "live", "pipeline"):
-        raise ConfigError("VOICE_MODE must be cascade, live or pipeline")
+    if mode not in ("darai", "cascade", "live", "pipeline"):
+        raise ConfigError("VOICE_MODE must be darai, cascade, live or pipeline")
     provider = _env(env, "VOICE_PROVIDER", "openai").lower()
     if provider not in ("openai", "gemini"):
         raise ConfigError("VOICE_PROVIDER must be openai or gemini")
     google_key = _env(env, "GOOGLE_API_KEY")
     openai_key = _env(env, "OPENAI_API_KEY")
-    # Live mode and the pipeline router both run on Gemini.
-    if not google_key:
+    # Live mode and the pipeline router both run on Gemini. In darai mode
+    # DarAI is the only model; a key is needed only for the chosen speech provider.
+    if not google_key and (mode != "darai" or provider == "gemini"):
         raise ConfigError("GOOGLE_API_KEY is required")
-    if mode in ("cascade", "pipeline") and provider == "openai" and openai_key in ("", "replace_me"):
+    if mode in ("darai", "cascade", "pipeline") and provider == "openai" and openai_key in ("", "replace_me"):
         raise ConfigError("OPENAI_API_KEY is required when VOICE_PROVIDER=openai")
     defaults = ModelSettings()
     return ModelSettings(

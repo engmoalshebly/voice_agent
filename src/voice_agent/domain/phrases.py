@@ -22,6 +22,19 @@ class Phrases:
     cancelled: str = 'تمام، توقفت عن انتظار الإجابة. كيف أقدر أساعدك؟'
     no_pending_lookup: str = 'ما عندي بحث جارٍ الآن. كيف أقدر أساعدك؟'
     away: str = 'أنا معك، خذ وقتك. إذا احتجت مساعدة أنا أسمعك.'
+    # -- darai mode: DarAI answers; these only cover what it cannot say itself --
+    #: Spoken once when a reply is taking a moment. Short, and rotated.
+    fillers: tuple[str, ...] = field(default_factory=lambda: (
+        'لحظة من فضلك.',
+        'تمام، ثواني.',
+        'حاضر، لحظة.',
+    ))
+    correction: str = 'عفواً، للتوضيح:'
+    turn_failed: str = 'أعتذر منك، حصل خلل بسيط. ممكن تعيد ما قلته؟'
+    no_reply: str = 'وصلتني رسالتك. إذا ما سمعت رداً، ممكن تعيد طلبك؟'
+    call_limit: str = 'وصلنا للحد الأقصى لمدة المكالمة. شكراً لتواصلك، ويمكنك الاتصال مرة أخرى في أي وقت.'
+    #: Used until the channel's own greeting comes from DarAI.
+    neutral_greeting: str = 'أهلاً وسهلاً بك. كيف أقدر أخدمك اليوم؟'
 
     @property
     def acknowledge(self) -> str:  # kept for callers that want a single phrase
