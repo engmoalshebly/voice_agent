@@ -72,7 +72,7 @@ class ModelSettings:
     #: back to that provider's voice if ElevenLabs fails or its quota runs out.
     tts_provider: str = ""
     elevenlabs_api_key: str = ""
-    elevenlabs_voice_id: str = "fAij0jR6iv2vHsJeuT0h"   # «صالح»
+    elevenlabs_voice_id: str = "rpGHcNQJvO8dFNNFNj1v"   # «Fahad», white Saudi dialect: closest to Yemeni callers
     elevenlabs_model: str = "eleven_flash_v2_5"
 
 

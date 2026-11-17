@@ -368,3 +368,32 @@ def test_the_listening_prompt_names_the_organisation_and_its_terms():
     assert "مع كاك بنك" in prompt and "كاك بنك، كاك بنكي." in prompt   # once each, in order
     assert stt_prompt_for("", []) == NEUTRAL_STT_PROMPT
     assert "  " not in stt_prompt_for("", ["متجر النور"])
+
+
+# -- no echo of the filler ----------------------------------------------------
+
+@pytest.mark.parametrize("sentence, expected", [
+    ("أكيد، تقدر تفتح حساب عندنا.", "تقدر تفتح حساب عندنا."),
+    ("تمام. الرسوم ألف ريال.", "الرسوم ألف ريال."),
+    ("طيب، ممكن توضح لي؟", "ممكن توضح لي؟"),
+    ("أكيد.", "أكيد."),                                     # nothing would be left: keep it
+    ("أكيدة المعلومة.", "أكيدة المعلومة."),                  # a different word
+    ("تقدر تفتح حساب، أكيد.", "تقدر تفتح حساب، أكيد."),      # only an opening word
+])
+def test_an_opening_acknowledgement_is_dropped(sentence, expected):
+    from voice_agent.infrastructure.darai_llm import without_acknowledgement
+
+    assert without_acknowledgement(sentence) == expected
+
+
+async def test_after_a_filler_the_answer_does_not_echo_it():
+    turns = FakeTurns([(0.1, TurnEvent("sentence", text="أكيد، تقدر تفتح حساب عندنا.")),
+                       (0, TurnEvent("sentence", text="طيب، فيه أنواع.")), (0, TurnEvent("end", reason="answered"))])
+    spoken = await _speak(turns, filler_delay=0.02)
+    assert spoken[0] in P.fillers
+    assert spoken[1:] == ["تقدر تفتح حساب عندنا.", "طيب، فيه أنواع."]   # only the first sentence is trimmed
+
+
+async def test_without_a_filler_the_answer_is_spoken_as_written():
+    turns = FakeTurns([(0, TurnEvent("sentence", text="أكيد، تقدر تفتح حساب.")), (0, TurnEvent("end", reason="answered"))])
+    assert await _speak(turns, filler_delay=0.5) == ["أكيد، تقدر تفتح حساب."]

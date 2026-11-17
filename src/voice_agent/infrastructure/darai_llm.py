@@ -12,6 +12,7 @@ import asyncio
 import dataclasses
 import logging
 import random
+import re
 import time
 import uuid
 from typing import Any
@@ -22,6 +23,18 @@ from ..domain.phrases import Phrases
 from .darai_turns import DaraiTurnClient, DaraiTurnError
 
 log = logging.getLogger(__name__)
+
+
+#: Words a reply may open with that only acknowledge. After a filler they echo it
+#: ("أكيد. أكيد، تقدر…"), so they are dropped from the first sentence.
+_ACKNOWLEDGEMENT = re.compile(
+    r"^\s*(?:أكيد|اكيد|تمام|طيب|حاضر|أبشر|ابشر|بالتأكيد|بالتاكيد|طبعاً|طبعا|حسناً|حسنا|ماشي)\s*[،,.!]+\s*")
+
+
+def without_acknowledgement(sentence: str) -> str:
+    """The sentence minus an opening acknowledgement; unchanged if nothing would be left."""
+    trimmed = _ACKNOWLEDGEMENT.sub("", sentence, count=1).strip()
+    return trimmed or sentence
 
 
 def last_user_message(chat_ctx: llm.ChatContext) -> tuple[str, str]:
@@ -86,6 +99,7 @@ class DaraiLLMStream(llm.LLMStream):
         loop = asyncio.get_running_loop()
         filler_at = started + owner._filler_delay if owner._filler_delay > 0 else None
         answered = False
+        filler_said = False
         first_ms: float | None = None
         reason = "error"
         events = owner._client.turn(
@@ -99,6 +113,7 @@ class DaraiLLMStream(llm.LLMStream):
                 if not done:
                     # DarAI is still working: say so instead of leaving silence.
                     self._say(request_id, owner.next_filler())
+                    filler_said = True
                     filler_at = None
                     continue
                 try:
@@ -107,10 +122,13 @@ class DaraiLLMStream(llm.LLMStream):
                     break
                 pending = asyncio.ensure_future(events.__anext__())
                 if event.kind == "sentence":
+                    text_out = event.text
                     if first_ms is None:
                         first_ms = (time.monotonic() - started) * 1000
+                        if filler_said:
+                            text_out = without_acknowledgement(text_out)
                     answered = True
-                    self._say(request_id, event.text)
+                    self._say(request_id, text_out)
                 elif event.kind == "replace":
                     answered = True
                     self._say(request_id, f"{owner._phrases.correction} {event.text}")
