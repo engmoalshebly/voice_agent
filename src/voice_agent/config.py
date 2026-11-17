@@ -49,6 +49,8 @@ class GatewaySettings:
     filler_delay: float = 1.2
     #: Longest call, in seconds. The visitor token is valid for an hour.
     max_call_seconds: float = 1800.0
+    #: Transcribe while the caller is still speaking (OpenAI realtime).
+    realtime_stt: bool = False
 
 
 @dataclass(frozen=True)
@@ -189,6 +191,7 @@ def gateway_settings(env: Mapping[str, str]) -> GatewaySettings:
         worker_key=_require(env, "VOICE_WORKER_KEY"),
         filler_delay=number("VOICE_FILLER_DELAY", defaults.filler_delay, 0.0),
         max_call_seconds=number("VOICE_MAX_CALL_SECONDS", defaults.max_call_seconds, 30.0),
+        realtime_stt=_env(env, "VOICE_STT_REALTIME").lower() in ("1", "true", "yes"),
     )
 
 

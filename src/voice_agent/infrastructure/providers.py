@@ -4,7 +4,8 @@ from __future__ import annotations
 from google import genai
 from google.genai import types
 from livekit.plugins import google, openai
-from livekit.agents import TurnHandlingOptions, inference
+from livekit.agents import TurnHandlingOptions, inference, tokenize, tts as agents_tts
+from livekit.agents.tokenize import token_stream
 
 from ..application.persona import VOICE_STYLE, bank_instructions
 from ..config import ModelSettings, TurnSettings
@@ -44,10 +45,40 @@ NEUTRAL_STT_PROMPT = (
 )
 
 
-def pipeline_speech(m: ModelSettings, stt_prompt: str = STT_PROMPT):
+def split_lines(text: str) -> list[str]:
+    """Complete lines, then whatever follows the last line break (maybe "")."""
+    *lines, rest = text.split("\n")
+    return [line for line in lines if line.strip()] + [rest]
+
+
+class LineTokenizer(tokenize.SentenceTokenizer):
+    """One line is one thing to say, released the moment its line break arrives.
+
+    The stock sentence tokenizer holds a sentence back until the next one
+    starts, to be sure it has ended. DarAI already sends whole sentences, so
+    in darai mode each is written as a line and spoken at once: a short "one
+    moment" is heard while the answer is still being written.
+    """
+
+    def tokenize(self, text: str, *, language: str | None = None) -> list[str]:
+        return [line for line in text.split("\n") if line.strip()]
+
+    def stream(self, *, language: str | None = None) -> tokenize.SentenceStream:
+        return token_stream.BufferedSentenceStream(tokenizer=split_lines, min_token_len=1, min_ctx_len=1)
+
+
+def spoken_by_line(tts):
+    """Wrap a non-streaming TTS so each line is synthesized as soon as it is complete."""
+    return agents_tts.StreamAdapter(tts=tts, sentence_tokenizer=LineTokenizer())
+
+
+def pipeline_speech(m: ModelSettings, stt_prompt: str = STT_PROMPT, *, realtime_stt: bool = False):
     if m.voice_provider == "openai":
         return (openai.STT(model=m.openai_stt_model, language="ar", prompt=stt_prompt,
-                           temperature=0, api_key=m.openai_api_key),
+                           api_key=m.openai_api_key,
+                           # Realtime transcription streams while the caller speaks,
+                           # so the turn ends sooner; it takes no temperature.
+                           **({"use_realtime": True} if realtime_stt else {"temperature": 0})),
                 openai.TTS(model=m.openai_tts_model, voice=m.openai_voice, instructions=VOICE_STYLE,
                            api_key=m.openai_api_key))
     return google.beta.GeminiSTT(language="ar", api_key=m.google_api_key), gemini_tts(m)

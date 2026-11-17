@@ -70,7 +70,8 @@ class DaraiLLMStream(llm.LLMStream):
 
     def _say(self, request_id: str, text: str) -> None:
         self._event_ch.send_nowait(llm.ChatChunk(
-            id=request_id, delta=llm.ChoiceDelta(role="assistant", content=text.strip() + " ")))
+            # One line per sentence: the line tokenizer speaks it immediately.
+            id=request_id, delta=llm.ChoiceDelta(role="assistant", content=text.strip() + "\n")))
 
     async def _run(self) -> None:
         owner = self._llm

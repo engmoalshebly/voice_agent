@@ -229,3 +229,45 @@ def test_darai_mode_needs_the_gateway_and_only_the_speech_providers_key():
                 {"DARAI_GATEWAY_URL": "http://g", "VOICE_WORKER_KEY": "k", "VOICE_FILLER_DELAY": "-1"}):
         with pytest.raises(ConfigError):
             gateway_settings(bad)
+
+
+# -- speaking each sentence the moment it is complete -------------------------
+
+async def test_each_line_is_released_as_soon_as_its_line_break_arrives():
+    from voice_agent.infrastructure.providers import LineTokenizer
+
+    stream = LineTokenizer().stream()
+    released = []
+
+    async def read():
+        async for token in stream:
+            released.append(token.token)
+
+    reader = asyncio.create_task(read())
+    stream.push_text("لحظة من فضلك.\n")           # the filler: short, and nothing follows yet
+    await asyncio.sleep(0.01)
+    assert released == ["لحظة من فضلك."]           # the stock tokenizer would still be holding it
+
+    stream.push_text("الرسوم ألف ")                 # a sentence arriving in pieces
+    await asyncio.sleep(0.01)
+    assert released == ["لحظة من فضلك."]
+    stream.push_text("ريال.\nهل أخدمك بشيء آخر؟")
+    await asyncio.sleep(0.01)
+    assert released == ["لحظة من فضلك.", "الرسوم ألف ريال."]
+
+    stream.end_input()                              # the tail without a line break
+    await reader
+    assert released == ["لحظة من فضلك.", "الرسوم ألف ريال.", "هل أخدمك بشيء آخر؟"]
+
+
+def test_line_tokenizer_ignores_blank_lines():
+    from voice_agent.infrastructure.providers import LineTokenizer, split_lines
+
+    assert LineTokenizer().tokenize("أ\n\n  \nب") == ["أ", "ب"]
+    assert split_lines("أ\n") == ["أ", ""] and split_lines("أ") == ["أ"] and split_lines("") == [""]
+
+
+async def test_the_model_writes_one_sentence_per_line():
+    turns = FakeTurns([(0, TurnEvent("sentence", text="أهلاً.")), (0, TurnEvent("end", reason="answered"))])
+    async with DaraiLLM(turns, "t", P).chat(chat_ctx=_ctx(("user", "س"))) as stream:
+        assert [c.delta.content async for c in stream] == ["أهلاً.\n"]

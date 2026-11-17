@@ -149,9 +149,10 @@ async def _darai_session(ctx: agents.JobContext, env, models, turns) -> None:
 
     phrases = DEFAULT_PHRASES
     client = DaraiTurnClient(gateway)
-    stt, tts = providers.pipeline_speech(models, stt_prompt=providers.NEUTRAL_STT_PROMPT)
+    stt, tts = providers.pipeline_speech(models, stt_prompt=providers.NEUTRAL_STT_PROMPT,
+                                         realtime_stt=gateway.realtime_stt)
     session = AgentSession(
-        stt=stt, tts=tts, vad=ctx.proc.userdata.get("vad"),
+        stt=stt, tts=providers.spoken_by_line(tts), vad=ctx.proc.userdata.get("vad"),
         llm=DaraiLLM(client, visitor_token, phrases, filler_delay=gateway.filler_delay, call_id=ctx.room.name),
         turn_handling=providers.turn_handling(turns),
         user_away_timeout=turns.away_timeout,
