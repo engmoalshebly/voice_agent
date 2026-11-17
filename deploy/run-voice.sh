@@ -47,9 +47,12 @@ if [[ $what == agent || $what == all ]]; then
   agent_env=()
   if [[ $MODE == darai ]]; then
     agent_env=(-e "DARAI_GATEWAY_URL=$GATEWAY_INTERNAL_URL" --env-file "$D/gateway-worker.env"
-               -e "VOICE_STT_REALTIME=${VOICE_STT_REALTIME:-false}" -e "VOICE_FILLER_DELAY=${VOICE_FILLER_DELAY:-1.2}"
-               -e "VOICE_TTS_PROVIDER=${VOICE_TTS_PROVIDER:-}" -e "ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID:-}"
-               -e "ELEVENLABS_MODEL=${ELEVENLABS_MODEL:-}")
+               -e "VOICE_STT_REALTIME=${VOICE_STT_REALTIME:-false}" -e "VOICE_FILLER_DELAY=${VOICE_FILLER_DELAY:-1.2}")
+    # Passed only when set here, so the values in agent.env stay in force.
+    for name in VOICE_TTS_PROVIDER ELEVENLABS_VOICE_ID ELEVENLABS_MODEL; do
+      [[ -n ${!name:-} ]] && agent_env+=(-e "$name=${!name}")
+    done
+    :
   fi
   docker rm -f darai-voice-agent >/dev/null 2>&1 || true
   # cpu-shares: real-time audio must win CPU contention on this shared 4-core host.
