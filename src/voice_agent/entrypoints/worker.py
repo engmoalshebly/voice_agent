@@ -23,6 +23,7 @@ from ..infrastructure import providers
 from ..infrastructure.darai import DaraiClient
 from ..infrastructure.darai_llm import DaraiLLM
 from ..infrastructure.darai_turns import DaraiTurnClient
+from ..infrastructure.provider_keys import ProviderKeys, with_keys
 from ..infrastructure.logs import configure_logging
 from ..infrastructure.state import StatePublisher
 
@@ -139,9 +140,22 @@ def _log_metrics(session: AgentSession, room_name: str) -> None:
         log.info("turn metrics %s %s", type(m).__name__, fields, extra={"room": room_name})
 
 
+#: One per process: the platform's provider keys, refreshed at most once a minute.
+_provider_keys: ProviderKeys | None = None
+
+
+def _keys_for(gateway) -> ProviderKeys:
+    global _provider_keys
+    if _provider_keys is None:
+        _provider_keys = ProviderKeys(gateway.keys_url, gateway.worker_key)
+    return _provider_keys
+
+
 async def _darai_session(ctx: agents.JobContext, env, models, turns) -> None:
     """DarAI answers. The worker only hears, speaks and keeps the turn-taking natural."""
     gateway = gateway_settings(env)
+    # The keys saved in «مفاتيح المزودين», read while the room connects.
+    keys = asyncio.create_task(_keys_for(gateway).current())
     await ctx.connect()
     participant = await ctx.wait_for_participant()
     visitor_token = (participant.attributes or {}).get(VISITOR_TOKEN_ATTRIBUTE, "").strip()
@@ -149,11 +163,13 @@ async def _darai_session(ctx: agents.JobContext, env, models, turns) -> None:
         # Without it there is no conversation to speak in; do not improvise one.
         log.error("visitor joined without a DarAI token; ending the call", extra={"room": ctx.room.name})
         ctx.shutdown(reason="missing visitor token")
+        keys.cancel()
         return
 
     phrases = DEFAULT_PHRASES
     client = DaraiTurnClient(gateway)
     call = await client.session(visitor_token)   # who this call speaks for; never raises
+    models = with_keys(models, await keys)       # never raises
     stt, tts = providers.pipeline_speech(
         models, stt_prompt=providers.stt_prompt_for(call.organization, call.stt_hints),
         realtime_stt=gateway.realtime_stt)

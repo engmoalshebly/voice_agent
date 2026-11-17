@@ -51,6 +51,9 @@ class GatewaySettings:
     max_call_seconds: float = 1800.0
     #: Transcribe while the caller is still speaking (OpenAI realtime).
     realtime_stt: bool = False
+    #: Where the platform's provider keys are read when a call starts
+    #: (DarAI «مفاتيح المزودين»). Empty: the environment keys only.
+    keys_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -201,7 +204,17 @@ def gateway_settings(env: Mapping[str, str]) -> GatewaySettings:
         filler_delay=number("VOICE_FILLER_DELAY", defaults.filler_delay, 0.0),
         max_call_seconds=number("VOICE_MAX_CALL_SECONDS", defaults.max_call_seconds, 30.0),
         realtime_stt=_env(env, "VOICE_STT_REALTIME").lower() in ("1", "true", "yes"),
+        keys_url=_keys_url(env),
     )
+
+
+def _keys_url(env: Mapping[str, str]) -> str:
+    url = _env(env, "DARAI_KEYS_URL")
+    if url:
+        parts = urlsplit(url)
+        if parts.scheme not in {"http", "https"} or not parts.netloc:
+            raise ConfigError("DARAI_KEYS_URL must be an http(s) URL")
+    return url
 
 
 def model_settings(env: Mapping[str, str]) -> ModelSettings:
@@ -213,11 +226,15 @@ def model_settings(env: Mapping[str, str]) -> ModelSettings:
         raise ConfigError("VOICE_PROVIDER must be openai or gemini")
     google_key = _env(env, "GOOGLE_API_KEY")
     openai_key = _env(env, "OPENAI_API_KEY")
+    # In darai mode with DARAI_KEYS_URL the keys come from DarAI on each call;
+    # environment keys are then an optional fallback.
+    keys_from_darai = mode == "darai" and bool(_env(env, "DARAI_KEYS_URL"))
     # Live mode and the pipeline router both run on Gemini. In darai mode
     # DarAI is the only model; a key is needed only for the chosen speech provider.
-    if not google_key and (mode != "darai" or provider == "gemini"):
+    if not google_key and not keys_from_darai and (mode != "darai" or provider == "gemini"):
         raise ConfigError("GOOGLE_API_KEY is required")
-    if mode in ("darai", "cascade", "pipeline") and provider == "openai" and openai_key in ("", "replace_me"):
+    if (mode in ("darai", "cascade", "pipeline") and provider == "openai" and not keys_from_darai
+            and openai_key in ("", "replace_me")):
         raise ConfigError("OPENAI_API_KEY is required when VOICE_PROVIDER=openai")
     defaults = ModelSettings()
     tts_provider = _env(env, "VOICE_TTS_PROVIDER").lower()
@@ -228,7 +245,7 @@ def model_settings(env: Mapping[str, str]) -> ModelSettings:
     if tts_provider in ("openai", "gemini"):
         raise ConfigError("VOICE_TTS_PROVIDER can only differ from VOICE_PROVIDER as elevenlabs")
     eleven_key = _env(env, "ELEVEN_API_KEY")
-    if tts_provider == "elevenlabs" and eleven_key in ("", "replace_me"):
+    if tts_provider == "elevenlabs" and not keys_from_darai and eleven_key in ("", "replace_me"):
         raise ConfigError("ELEVEN_API_KEY is required when VOICE_TTS_PROVIDER=elevenlabs")
     return ModelSettings(
         tts_provider=tts_provider,
