@@ -76,3 +76,25 @@ def test_rate_limiter_window():
     assert rl.allow("a") and not rl.allow("a") and rl.allow("b")
     now[0] = 61
     assert rl.allow("a")
+
+
+async def test_config_tells_the_page_where_calls_are_set_up(client, tmp_path):
+    assert await (await client.get("/api/config")).json() == {"gatewayUrl": "", "channelId": ""}   # legacy demo
+
+    env = {**ENV, "WEB_STATIC_DIR": str(tmp_path),
+           "VOICE_GATEWAY_PUBLIC_URL": "https://app.example.com/", "VOICE_CHANNEL_ID": "webchat_1"}
+    darai = TestClient(TestServer(create_app(env)))
+    await darai.start_server()
+    try:
+        response = await darai.get("/api/config")
+        assert await response.json() == {"gatewayUrl": "https://app.example.com", "channelId": "webchat_1"}
+        assert response.headers["Cache-Control"] == "no-store"
+    finally:
+        await darai.close()
+
+
+def test_the_public_gateway_url_must_be_https(tmp_path):
+    from voice_agent.config import ConfigError
+
+    with pytest.raises(ConfigError, match="VOICE_GATEWAY_PUBLIC_URL"):
+        create_app({**ENV, "WEB_STATIC_DIR": str(tmp_path), "VOICE_GATEWAY_PUBLIC_URL": "http://app.example.com"})

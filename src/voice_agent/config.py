@@ -75,6 +75,10 @@ class WebSettings:
     token_ttl_minutes: int = 10
     tokens_per_minute: int = 6
     trust_proxy: bool = False
+    #: DarAI realtime gateway as browsers reach it, and the webchat channel
+    #: (widget id) this page's calls belong to. Both empty = legacy demo.
+    gateway_public_url: str = ""
+    channel_id: str = ""
     static_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parents[3] / "web" / "dist")
 
 
@@ -220,6 +224,16 @@ def model_settings(env: Mapping[str, str]) -> ModelSettings:
     )
 
 
+def _public_url(env: Mapping[str, str], name: str) -> str:
+    value = _env(env, name).rstrip("/")
+    if not value:
+        return ""
+    parts = urlsplit(value)
+    if parts.scheme != "https" or not parts.netloc:
+        raise ConfigError(f"{name} must be an HTTPS URL")
+    return value
+
+
 def web_settings(env: Mapping[str, str]) -> WebSettings:
     defaults = WebSettings()
     static = _env(env, "WEB_STATIC_DIR")
@@ -230,6 +244,8 @@ def web_settings(env: Mapping[str, str]) -> WebSettings:
         token_ttl_minutes=_int(env, "TOKEN_TTL_MINUTES", defaults.token_ttl_minutes),
         tokens_per_minute=_int(env, "TOKENS_PER_MINUTE", defaults.tokens_per_minute),
         trust_proxy=_env(env, "TRUST_PROXY").lower() in ("1", "true", "yes"),
+        gateway_public_url=_public_url(env, "VOICE_GATEWAY_PUBLIC_URL"),
+        channel_id=_env(env, "VOICE_CHANNEL_ID"),
         static_dir=Path(static) if static else defaults.static_dir,
     )
 

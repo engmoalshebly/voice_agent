@@ -15,6 +15,8 @@ export function describeError(error: unknown): FriendlyError {
         return { title: 'محاولات كثيرة', detail: 'بدأت عدة مكالمات خلال وقت قصير. انتظر دقيقة ثم حاول مجدداً.', retryable: true };
       case 'origin_forbidden':
         return { title: 'مصدر غير مسموح', detail: 'افتح المساعد من رابطه الرسمي.', retryable: false };
+      case 'channel_unavailable':
+        return { title: 'القناة غير متاحة', detail: 'هذه القناة غير مفعّلة حالياً. تواصل مع صاحب الموقع.', retryable: false };
       case 'not_configured':
         return { title: 'الخدمة غير جاهزة', detail: 'خدمة الصوت قيد الإعداد حالياً. حاول لاحقاً.', retryable: true };
       case 'network':

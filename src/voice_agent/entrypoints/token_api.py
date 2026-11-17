@@ -101,6 +101,16 @@ async def issue_token(request: web.Request) -> web.Response:
                              headers={"Cache-Control": "no-store"})
 
 
+async def client_config(request: web.Request) -> web.Response:
+    """Where the page sets a call up. With a gateway and a channel, a call is
+    that channel's DarAI conversation; without them, the legacy anonymous demo."""
+    settings = request.app[SETTINGS]
+    return web.json_response(
+        {"gatewayUrl": settings.gateway_public_url, "channelId": settings.channel_id},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 async def health(_: web.Request) -> web.Response:
     return web.json_response({"status": "ok"})
 
@@ -141,6 +151,7 @@ def create_app(env=None) -> web.Application:
     app.router.add_get("/healthz", health)
     app.router.add_get("/readyz", ready)
     app.router.add_post("/api/token", issue_token)
+    app.router.add_get("/api/config", client_config)
 
     index = settings.static_dir / "index.html"
 
