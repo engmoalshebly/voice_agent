@@ -11,5 +11,5 @@ export default defineConfig({
     proxy: { '/api': { target: 'http://127.0.0.1:8000', changeOrigin: false } },
   },
   build: { target: 'es2022', sourcemap: false, chunkSizeWarningLimit: 900 },
-  test: { environment: 'jsdom', include: ['src/**/*.test.ts?(x)'] },
+  test: { environment: 'jsdom', include: ['src/**/*.test.ts?(x)', 'widget/**/*.test.ts'] },
 });

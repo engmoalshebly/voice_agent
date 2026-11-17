@@ -98,3 +98,26 @@ def test_the_public_gateway_url_must_be_https(tmp_path):
 
     with pytest.raises(ConfigError, match="VOICE_GATEWAY_PUBLIC_URL"):
         create_app({**ENV, "WEB_STATIC_DIR": str(tmp_path), "VOICE_GATEWAY_PUBLIC_URL": "http://app.example.com"})
+
+
+async def test_the_widget_scripts_are_served_to_any_site(tmp_path):
+    (tmp_path / "index.html").write_text("<html></html>", encoding="utf-8")
+    (tmp_path / "widget.js").write_text("console.log('button')", encoding="utf-8")
+    (tmp_path / "widget-call.js").write_text("console.log('call')", encoding="utf-8")
+    c = TestClient(TestServer(create_app({**ENV, "WEB_STATIC_DIR": str(tmp_path)})))
+    await c.start_server()
+    try:
+        for name, body in (("widget.js", "button"), ("widget-call.js", "call")):
+            response = await c.get(f"/{name}")
+            assert response.status == 200 and body in await response.text()
+            assert response.headers["Access-Control-Allow-Origin"] == "*"
+            assert response.headers["Content-Type"].startswith("application/javascript")
+        config = await c.get("/api/config")
+        assert config.headers["Access-Control-Allow-Origin"] == "*"
+    finally:
+        await c.close()
+
+
+async def test_a_missing_widget_build_is_a_clear_404(client):
+    response = await client.get("/widget.js")
+    assert response.status == 404

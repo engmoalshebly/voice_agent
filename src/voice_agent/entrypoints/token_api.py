@@ -107,8 +107,13 @@ async def client_config(request: web.Request) -> web.Response:
     settings = request.app[SETTINGS]
     return web.json_response(
         {"gatewayUrl": settings.gateway_public_url, "channelId": settings.channel_id},
-        headers={"Cache-Control": "no-store"},
+        # Read by the embeddable widget from any customer site; it holds no secret.
+        headers={"Cache-Control": "no-store", "Access-Control-Allow-Origin": "*"},
     )
+
+
+#: The embeddable voice assistant: the button, and the call it loads on press.
+WIDGET_FILES = ("widget.js", "widget-call.js")
 
 
 async def health(_: web.Request) -> web.Response:
@@ -161,6 +166,22 @@ def create_app(env=None) -> web.Application:
         return web.FileResponse(index, headers={"Cache-Control": "no-cache"})
 
     app.router.add_get("/", spa)
+
+    def widget_file(name: str):
+        path = settings.static_dir / name
+
+        async def serve(_: web.Request) -> web.StreamResponse:
+            if not path.is_file():
+                return web.Response(status=404, text="Widget is not built")
+            return web.FileResponse(path, headers={
+                "Content-Type": "application/javascript; charset=utf-8",
+                "Access-Control-Allow-Origin": "*",          # included by customer sites
+                "Cache-Control": "public, max-age=300",       # a new build reaches sites within minutes
+            })
+        return serve
+
+    for name in WIDGET_FILES:
+        app.router.add_get(f"/{name}", widget_file(name))
     for folder in ("assets", "brand", "fonts"):
         path = settings.static_dir / folder
         if path.is_dir():

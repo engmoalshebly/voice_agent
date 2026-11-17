@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && npm run build:widget",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:widget": "vite build -c vite.widget.config.ts --mode loader && vite build -c vite.widget.config.ts --mode call"
   },
   "dependencies": {
     "@livekit/components-react": "2.9.25",
