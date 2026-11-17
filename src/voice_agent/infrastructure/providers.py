@@ -78,19 +78,20 @@ def spoken_by_line(tts):
     return agents_tts.StreamAdapter(tts=tts, sentence_tokenizer=LineTokenizer())
 
 
-def elevenlabs_tts(m: ModelSettings):
+def elevenlabs_tts(m: ModelSettings, voice_id: str = ""):
     from livekit.plugins import elevenlabs  # imported on use: optional provider
 
-    return elevenlabs.TTS(voice_id=m.elevenlabs_voice_id, model=m.elevenlabs_model,
+    return elevenlabs.TTS(voice_id=voice_id or m.elevenlabs_voice_id, model=m.elevenlabs_model,
                           api_key=m.elevenlabs_api_key, language="ar", auto_mode=True)
 
 
-def call_voice(m: ModelSettings, base_tts):
-    """The voice of a call: ElevenLabs when chosen, with ``base_tts`` behind it
-    so an outage or an exhausted quota changes the voice instead of ending the call."""
+def call_voice(m: ModelSettings, base_tts, voice_id: str = ""):
+    """The voice of a call: ElevenLabs when chosen (``voice_id`` = the assistant's
+    own voice, else the configured default), with ``base_tts`` behind it so an
+    outage or an exhausted quota changes the voice instead of ending the call."""
     if m.tts_provider != "elevenlabs":
         return spoken_by_line(base_tts)
-    return agents_tts.FallbackAdapter([spoken_by_line(elevenlabs_tts(m)), spoken_by_line(base_tts)],
+    return agents_tts.FallbackAdapter([spoken_by_line(elevenlabs_tts(m, voice_id)), spoken_by_line(base_tts)],
                                       max_retry_per_tts=0)
 
 

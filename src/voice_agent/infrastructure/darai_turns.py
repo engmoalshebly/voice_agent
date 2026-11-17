@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import AsyncIterator, Optional
 
@@ -22,6 +23,7 @@ import aiohttp
 from ..config import GatewaySettings
 
 log = logging.getLogger(__name__)
+_VOICE_ID = re.compile(r"[A-Za-z0-9_-]{8,64}")
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,10 @@ class CallSession:
     organization: str = ""
     greeting: str = ""
     stt_hints: tuple[str, ...] = ()
+    #: The assistant's voice and limits, already within the platform's policy.
+    voice_id: str = ""
+    max_call_seconds: float | None = None
+    filler_enabled: bool = True
 
 
 class DaraiTurnError(RuntimeError):
@@ -128,10 +134,16 @@ class DaraiTurnClient:
         if not isinstance(data, dict):
             return CallSession()
         hints = data.get("stt_hints") if isinstance(data.get("stt_hints"), list) else []
+        voice = data.get("voice") if isinstance(data.get("voice"), dict) else {}
+        voice_id = str(voice.get("voice_id") or "").strip()
+        seconds = voice.get("max_call_seconds")
         return CallSession(
             organization=str(data.get("organization") or "").strip(),
             greeting=str(data.get("greeting") or "").strip(),
             stt_hints=tuple(str(h).strip() for h in hints if str(h).strip())[:24],
+            voice_id=voice_id if _VOICE_ID.fullmatch(voice_id) else "",
+            max_call_seconds=float(seconds) if isinstance(seconds, (int, float)) and seconds >= 30 else None,
+            filler_enabled=voice.get("filler_enabled") is not False,
         )
 
     async def close(self) -> None:

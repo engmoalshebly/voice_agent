@@ -320,7 +320,9 @@ async def test_the_session_brings_the_greeting_and_the_names_to_listen_for():
 
     async def reply(request):
         return web.json_response({"organization": "كاك بنك", "greeting": "مرحباً بك! كيف نخدمك؟",
-                                  "stt_hints": ["كاك بنك", " ", "كاك بنكي", 7]})
+                                  "stt_hints": ["كاك بنك", " ", "كاك بنكي", 7],
+                                  "voice": {"voice_id": "O7RAXQn7KXIEqLr2JNyO", "max_call_seconds": 300,
+                                            "filler_enabled": False}})
 
     seen = {}
 
@@ -347,7 +349,8 @@ async def test_the_session_brings_the_greeting_and_the_names_to_listen_for():
             await client.close()
 
     assert got == CallSession(organization="كاك بنك", greeting="مرحباً بك! كيف نخدمك؟",
-                              stt_hints=("كاك بنك", "كاك بنكي", "7"))
+                              stt_hints=("كاك بنك", "كاك بنكي", "7"), voice_id="O7RAXQn7KXIEqLr2JNyO",
+                              max_call_seconds=300.0, filler_enabled=False)
     assert seen["Authorization"] == "Bearer visitor-jwt" and seen["X-Voice-Worker-Key"] == "wk"
 
 
@@ -425,3 +428,20 @@ def test_only_the_first_sentence_is_trimmed_and_sizes_are_spoken():
         "صورتين 4 في 6 وصورة 3 في 4."
     assert spoken_answer("أكيد، أهلاً بك. المطلوب الهوية.", first=True, after_filler=True, caller_text="ايش المطلوب") \
         == "أهلاً بك. المطلوب الهوية."   # one trim per kind, welcome only at the very start
+
+
+def test_a_malformed_session_voice_is_ignored():
+    from voice_agent.infrastructure.darai_turns import CallSession
+
+    assert CallSession().voice_id == "" and CallSession().filler_enabled is True
+
+
+async def test_the_call_speaks_with_the_assistants_voice():
+    from voice_agent.infrastructure import providers
+
+    models = model_settings({**BASE, "VOICE_TTS_PROVIDER": "elevenlabs", "ELEVEN_API_KEY": "k", "ELEVENLABS_VOICE_ID": "DefaultVoice1"})
+    _, base = providers.pipeline_speech(models)
+    chosen = providers.call_voice(models, base, voice_id="O7RAXQn7KXIEqLr2JNyO")._tts_instances[0]._wrapped_tts
+    default = providers.call_voice(models, base)._tts_instances[0]._wrapped_tts
+    assert chosen._opts.voice_id == "O7RAXQn7KXIEqLr2JNyO"
+    assert default._opts.voice_id == "DefaultVoice1"

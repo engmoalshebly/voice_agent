@@ -158,8 +158,9 @@ async def _darai_session(ctx: agents.JobContext, env, models, turns) -> None:
         models, stt_prompt=providers.stt_prompt_for(call.organization, call.stt_hints),
         realtime_stt=gateway.realtime_stt)
     session = AgentSession(
-        stt=stt, tts=providers.call_voice(models, tts), vad=ctx.proc.userdata.get("vad"),
-        llm=DaraiLLM(client, visitor_token, phrases, filler_delay=gateway.filler_delay, call_id=ctx.room.name),
+        stt=stt, tts=providers.call_voice(models, tts, voice_id=call.voice_id), vad=ctx.proc.userdata.get("vad"),
+        llm=DaraiLLM(client, visitor_token, phrases, call_id=ctx.room.name,
+                     filler_delay=gateway.filler_delay if call.filler_enabled else 0.0),
         turn_handling=providers.turn_handling(turns),
         user_away_timeout=turns.away_timeout,
     )
@@ -174,8 +175,11 @@ async def _darai_session(ctx: agents.JobContext, env, models, turns) -> None:
         elif event.new_state == "speaking":
             away_said = False
 
+    # The assistant's own limit, never above the worker's.
+    max_call_seconds = min(gateway.max_call_seconds, call.max_call_seconds or gateway.max_call_seconds)
+
     async def _limit() -> None:
-        await asyncio.sleep(gateway.max_call_seconds)
+        await asyncio.sleep(max_call_seconds)
         log.info("call reached its time limit", extra={"room": ctx.room.name})
         await session.say(phrases.call_limit, allow_interruptions=False)
         ctx.shutdown(reason="call time limit")
