@@ -16,7 +16,7 @@
 #   gateway-worker.env   VOICE_WORKER_KEY (the same file the gateway reads)
 set -euo pipefail
 D=/opt/darai/secrets/voice
-IMAGE=${IMAGE:-darai-voice-web:20261117b}
+IMAGE=${IMAGE:-darai-voice-web:20261118}
 NET=darai_edge_net
 APP_NET=darai_app_net
 MODE=${VOICE_MODE:-darai}

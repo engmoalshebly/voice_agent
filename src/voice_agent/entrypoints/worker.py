@@ -158,7 +158,8 @@ async def _darai_session(ctx: agents.JobContext, env, models, turns) -> None:
         models, stt_prompt=providers.stt_prompt_for(call.organization, call.stt_hints),
         realtime_stt=gateway.realtime_stt)
     session = AgentSession(
-        stt=stt, tts=providers.call_voice(models, tts, voice_id=call.voice_id), vad=ctx.proc.userdata.get("vad"),
+        stt=stt, tts=providers.call_voice(models, tts, voice_id=call.voice_id, provider=call.voice_provider),
+        vad=ctx.proc.userdata.get("vad"),
         llm=DaraiLLM(client, visitor_token, phrases, call_id=ctx.room.name,
                      filler_delay=gateway.filler_delay if call.filler_enabled else 0.0),
         turn_handling=providers.turn_handling(turns),

@@ -85,13 +85,28 @@ def elevenlabs_tts(m: ModelSettings, voice_id: str = ""):
                           api_key=m.elevenlabs_api_key, language="ar", auto_mode=True)
 
 
-def call_voice(m: ModelSettings, base_tts, voice_id: str = ""):
-    """The voice of a call: ElevenLabs when chosen (``voice_id`` = the assistant's
-    own voice, else the configured default), with ``base_tts`` behind it so an
-    outage or an exhausted quota changes the voice instead of ending the call."""
-    if m.tts_provider != "elevenlabs":
+def provider_voice(m: ModelSettings, provider: str, voice_id: str):
+    """A TTS for one provider's voice, or None when this worker has no key for it."""
+    if provider == "elevenlabs" and m.elevenlabs_api_key:
+        return elevenlabs_tts(m, voice_id)
+    if provider == "openai" and m.openai_api_key:
+        return openai.TTS(model=m.openai_tts_model, voice=voice_id, instructions=VOICE_STYLE, api_key=m.openai_api_key)
+    if provider == "gemini" and m.google_api_key:
+        return google.beta.GeminiTTS(model=m.gemini_tts_model, voice_name=voice_id,
+                                     instructions=VOICE_STYLE, api_key=m.google_api_key)
+    return None
+
+
+def call_voice(m: ModelSettings, base_tts, voice_id: str = "", provider: str = ""):
+    """The voice of a call: the assistant's own (``provider`` + ``voice_id``), else
+    the configured ElevenLabs default, with ``base_tts`` behind it so an outage or
+    an exhausted quota changes the voice instead of ending the call."""
+    chosen = provider_voice(m, provider, voice_id) if provider and voice_id else None
+    if chosen is None and m.tts_provider == "elevenlabs":
+        chosen = elevenlabs_tts(m, voice_id if provider in ("", "elevenlabs") else "")
+    if chosen is None:
         return spoken_by_line(base_tts)
-    return agents_tts.FallbackAdapter([spoken_by_line(elevenlabs_tts(m, voice_id)), spoken_by_line(base_tts)],
+    return agents_tts.FallbackAdapter([spoken_by_line(chosen), spoken_by_line(base_tts)],
                                       max_retry_per_tts=0)
 
 

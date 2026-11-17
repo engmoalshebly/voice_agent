@@ -321,8 +321,8 @@ async def test_the_session_brings_the_greeting_and_the_names_to_listen_for():
     async def reply(request):
         return web.json_response({"organization": "كاك بنك", "greeting": "مرحباً بك! كيف نخدمك؟",
                                   "stt_hints": ["كاك بنك", " ", "كاك بنكي", 7],
-                                  "voice": {"voice_id": "O7RAXQn7KXIEqLr2JNyO", "max_call_seconds": 300,
-                                            "filler_enabled": False}})
+                                  "voice": {"provider": "elevenlabs", "voice_id": "O7RAXQn7KXIEqLr2JNyO",
+                                            "max_call_seconds": 300, "filler_enabled": False}})
 
     seen = {}
 
@@ -349,7 +349,7 @@ async def test_the_session_brings_the_greeting_and_the_names_to_listen_for():
             await client.close()
 
     assert got == CallSession(organization="كاك بنك", greeting="مرحباً بك! كيف نخدمك؟",
-                              stt_hints=("كاك بنك", "كاك بنكي", "7"), voice_id="O7RAXQn7KXIEqLr2JNyO",
+                              stt_hints=("كاك بنك", "كاك بنكي", "7"), voice_provider="elevenlabs", voice_id="O7RAXQn7KXIEqLr2JNyO",
                               max_call_seconds=300.0, filler_enabled=False)
     assert seen["Authorization"] == "Bearer visitor-jwt" and seen["X-Voice-Worker-Key"] == "wk"
 
@@ -441,7 +441,40 @@ async def test_the_call_speaks_with_the_assistants_voice():
 
     models = model_settings({**BASE, "VOICE_TTS_PROVIDER": "elevenlabs", "ELEVEN_API_KEY": "k", "ELEVENLABS_VOICE_ID": "DefaultVoice1"})
     _, base = providers.pipeline_speech(models)
-    chosen = providers.call_voice(models, base, voice_id="O7RAXQn7KXIEqLr2JNyO")._tts_instances[0]._wrapped_tts
+    chosen = providers.call_voice(models, base, voice_id="O7RAXQn7KXIEqLr2JNyO", provider="elevenlabs")._tts_instances[0]._wrapped_tts
     default = providers.call_voice(models, base)._tts_instances[0]._wrapped_tts
     assert chosen._opts.voice_id == "O7RAXQn7KXIEqLr2JNyO"
     assert default._opts.voice_id == "DefaultVoice1"
+
+
+@pytest.mark.parametrize("provider, voice_id, module, attribute", [
+    ("openai", "marin", "livekit.plugins.openai", "voice"),
+    ("gemini", "Kore", "livekit.plugins.google", "voice_name"),
+    ("elevenlabs", "O7RAXQn7KXIEqLr2JNyO", "livekit.plugins.elevenlabs", "voice_id"),
+])
+async def test_each_provider_speaks_the_chosen_voice(provider, voice_id, module, attribute):
+    from voice_agent.infrastructure import providers
+
+    models = model_settings({**BASE, "ELEVEN_API_KEY": "k", "GOOGLE_API_KEY": "g"})
+    _, base = providers.pipeline_speech(models)
+    voice = providers.call_voice(models, base, voice_id=voice_id, provider=provider)
+    chosen = voice._tts_instances[0]._wrapped_tts
+    assert type(chosen).__module__.startswith(module)
+    assert getattr(chosen._opts, attribute) == voice_id
+    assert type(voice._tts_instances[1]._wrapped_tts).__module__.startswith("livekit.plugins.openai")   # fallback
+
+
+async def test_a_provider_without_a_key_falls_back_to_the_base_voice():
+    from livekit.agents import tts as agents_tts
+    from voice_agent.infrastructure import providers
+
+    models = model_settings(BASE)                       # no ElevenLabs or Google key here
+    _, base = providers.pipeline_speech(models)
+    voice = providers.call_voice(models, base, voice_id="Kore", provider="gemini")
+    assert isinstance(voice, agents_tts.StreamAdapter) and voice._wrapped_tts is base
+
+
+def test_a_session_voice_needs_a_known_provider():
+    from voice_agent.infrastructure.darai_turns import CallSession
+
+    assert CallSession(voice_provider="gemini", voice_id="Kore").voice_id == "Kore"
