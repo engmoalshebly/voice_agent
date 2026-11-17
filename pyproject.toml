@@ -8,7 +8,7 @@ version = "2.0.0"
 description = "Arabic voice agent for DarAI over LiveKit"
 requires-python = ">=3.11"
 dependencies = [
-  "livekit-agents[openai,google,silero]==1.8.11",
+  "livekit-agents[openai,google,silero,elevenlabs]==1.8.11",
   "livekit-api>=1.0,<2",
   "google-genai==2.30.1",
   "python-dotenv>=1.0,<2",

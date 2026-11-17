@@ -272,3 +272,38 @@ async def test_the_model_writes_one_sentence_per_line():
     turns = FakeTurns([(0, TurnEvent("sentence", text="أهلاً.")), (0, TurnEvent("end", reason="answered"))])
     async with DaraiLLM(turns, "t", P).chat(chat_ctx=_ctx(("user", "س"))) as stream:
         assert [c.delta.content async for c in stream] == ["أهلاً.\n"]
+
+
+# -- ElevenLabs as the voice, with a fallback ---------------------------------
+
+BASE = {"VOICE_MODE": "darai", "VOICE_PROVIDER": "openai", "OPENAI_API_KEY": "sk-x"}
+
+
+def test_elevenlabs_is_optional_and_needs_its_key():
+    assert model_settings(BASE).tts_provider == ""
+    assert model_settings({**BASE, "VOICE_TTS_PROVIDER": "openai"}).tts_provider == ""    # same as listening
+    chosen = model_settings({**BASE, "VOICE_TTS_PROVIDER": "ElevenLabs", "ELEVEN_API_KEY": "k",
+                             "ELEVENLABS_VOICE_ID": "voice1", "ELEVENLABS_MODEL": ""})
+    assert (chosen.tts_provider, chosen.elevenlabs_voice_id, chosen.elevenlabs_model) == (
+        "elevenlabs", "voice1", "eleven_flash_v2_5")
+    for bad in ({"VOICE_TTS_PROVIDER": "elevenlabs"}, {"VOICE_TTS_PROVIDER": "gemini"},
+                {"VOICE_TTS_PROVIDER": "azure"}):
+        with pytest.raises(ConfigError):
+            model_settings({**BASE, **bad})
+
+
+async def test_the_call_voice_is_elevenlabs_backed_by_the_listening_providers_voice():
+    from livekit.agents import tts as agents_tts
+    from voice_agent.infrastructure import providers
+
+    openai_models = model_settings(BASE)
+    _, base = providers.pipeline_speech(openai_models)
+    plain = providers.call_voice(openai_models, base)
+    assert isinstance(plain, agents_tts.StreamAdapter)                 # line by line, as before
+
+    eleven = model_settings({**BASE, "VOICE_TTS_PROVIDER": "elevenlabs", "ELEVEN_API_KEY": "k"})
+    voice = providers.call_voice(eleven, base)
+    assert isinstance(voice, agents_tts.FallbackAdapter)
+    first, second = voice._tts_instances
+    assert type(first).__module__.startswith("livekit.plugins.elevenlabs") and first.capabilities.streaming
+    assert isinstance(second, agents_tts.StreamAdapter)                # quota or outage: the call goes on

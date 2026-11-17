@@ -108,6 +108,10 @@ class PipelineAssistant(_FlowAgent):
 def _prewarm(proc: JobProcess) -> None:
     """Pay import/model cost once per process, not on the caller's first second."""
     from livekit.plugins import google, silero  # noqa: F401
+    try:  # plugins must register on the main thread
+        from livekit.plugins import elevenlabs  # noqa: F401
+    except ImportError:
+        pass
     bank_instructions()
     proc.userdata["vad"] = silero.VAD.load()
 
@@ -152,7 +156,7 @@ async def _darai_session(ctx: agents.JobContext, env, models, turns) -> None:
     stt, tts = providers.pipeline_speech(models, stt_prompt=providers.NEUTRAL_STT_PROMPT,
                                          realtime_stt=gateway.realtime_stt)
     session = AgentSession(
-        stt=stt, tts=providers.spoken_by_line(tts), vad=ctx.proc.userdata.get("vad"),
+        stt=stt, tts=providers.call_voice(models, tts), vad=ctx.proc.userdata.get("vad"),
         llm=DaraiLLM(client, visitor_token, phrases, filler_delay=gateway.filler_delay, call_id=ctx.room.name),
         turn_handling=providers.turn_handling(turns),
         user_away_timeout=turns.away_timeout,

@@ -68,8 +68,30 @@ class LineTokenizer(tokenize.SentenceTokenizer):
 
 
 def spoken_by_line(tts):
-    """Wrap a non-streaming TTS so each line is synthesized as soon as it is complete."""
+    """Make ``tts`` speak each line as soon as it is complete.
+
+    A streaming TTS already speaks while text arrives and is returned as is;
+    a non-streaming one is wrapped so it synthesizes line by line.
+    """
+    if tts.capabilities.streaming:
+        return tts
     return agents_tts.StreamAdapter(tts=tts, sentence_tokenizer=LineTokenizer())
+
+
+def elevenlabs_tts(m: ModelSettings):
+    from livekit.plugins import elevenlabs  # imported on use: optional provider
+
+    return elevenlabs.TTS(voice_id=m.elevenlabs_voice_id, model=m.elevenlabs_model,
+                          api_key=m.elevenlabs_api_key, language="ar", auto_mode=True)
+
+
+def call_voice(m: ModelSettings, base_tts):
+    """The voice of a call: ElevenLabs when chosen, with ``base_tts`` behind it
+    so an outage or an exhausted quota changes the voice instead of ending the call."""
+    if m.tts_provider != "elevenlabs":
+        return spoken_by_line(base_tts)
+    return agents_tts.FallbackAdapter([elevenlabs_tts(m), spoken_by_line(base_tts)],
+                                      max_retry_per_tts=0)
 
 
 def pipeline_speech(m: ModelSettings, stt_prompt: str = STT_PROMPT, *, realtime_stt: bool = False):

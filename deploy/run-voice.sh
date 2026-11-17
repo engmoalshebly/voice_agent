@@ -10,11 +10,13 @@
 #
 # Secrets live in /opt/darai/secrets/voice, never in Git:
 #   livekit.env          LIVEKIT_API_KEY, LIVEKIT_API_SECRET
-#   agent.env            speech provider keys (and the demo modes' DarAI key)
+#   agent.env            speech provider keys: OPENAI_API_KEY, GOOGLE_API_KEY, ELEVEN_API_KEY
+#                        (and the demo modes' DarAI key). VOICE_TTS_PROVIDER=elevenlabs
+#                        speaks with ElevenLabs and falls back to the listening provider.
 #   gateway-worker.env   VOICE_WORKER_KEY (the same file the gateway reads)
 set -euo pipefail
 D=/opt/darai/secrets/voice
-IMAGE=${IMAGE:-darai-voice-web:20261117}
+IMAGE=${IMAGE:-darai-voice-web:20261117b}
 NET=darai_edge_net
 APP_NET=darai_app_net
 MODE=${VOICE_MODE:-darai}
@@ -45,7 +47,9 @@ if [[ $what == agent || $what == all ]]; then
   agent_env=()
   if [[ $MODE == darai ]]; then
     agent_env=(-e "DARAI_GATEWAY_URL=$GATEWAY_INTERNAL_URL" --env-file "$D/gateway-worker.env"
-               -e "VOICE_STT_REALTIME=${VOICE_STT_REALTIME:-false}" -e "VOICE_FILLER_DELAY=${VOICE_FILLER_DELAY:-1.2}")
+               -e "VOICE_STT_REALTIME=${VOICE_STT_REALTIME:-false}" -e "VOICE_FILLER_DELAY=${VOICE_FILLER_DELAY:-1.2}"
+               -e "VOICE_TTS_PROVIDER=${VOICE_TTS_PROVIDER:-}" -e "ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID:-}"
+               -e "ELEVENLABS_MODEL=${ELEVENLABS_MODEL:-}")
   fi
   docker rm -f darai-voice-agent >/dev/null 2>&1 || true
   # cpu-shares: real-time audio must win CPU contention on this shared 4-core host.

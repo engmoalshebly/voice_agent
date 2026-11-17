@@ -67,6 +67,13 @@ class ModelSettings:
     openai_stt_model: str = "gpt-4o-transcribe"
     openai_tts_model: str = "gpt-4o-mini-tts"
     openai_voice: str = "marin"
+    #: Who speaks. "" = the same provider that listens (voice_provider).
+    #: "elevenlabs" streams audio while the text is still arriving, and falls
+    #: back to that provider's voice if ElevenLabs fails or its quota runs out.
+    tts_provider: str = ""
+    elevenlabs_api_key: str = ""
+    elevenlabs_voice_id: str = "fAij0jR6iv2vHsJeuT0h"   # «صالح»
+    elevenlabs_model: str = "eleven_flash_v2_5"
 
 
 @dataclass(frozen=True)
@@ -211,7 +218,21 @@ def model_settings(env: Mapping[str, str]) -> ModelSettings:
     if mode in ("darai", "cascade", "pipeline") and provider == "openai" and openai_key in ("", "replace_me"):
         raise ConfigError("OPENAI_API_KEY is required when VOICE_PROVIDER=openai")
     defaults = ModelSettings()
+    tts_provider = _env(env, "VOICE_TTS_PROVIDER").lower()
+    if tts_provider not in ("", "openai", "gemini", "elevenlabs"):
+        raise ConfigError("VOICE_TTS_PROVIDER must be openai, gemini or elevenlabs")
+    if tts_provider == provider:
+        tts_provider = ""
+    if tts_provider in ("openai", "gemini"):
+        raise ConfigError("VOICE_TTS_PROVIDER can only differ from VOICE_PROVIDER as elevenlabs")
+    eleven_key = _env(env, "ELEVEN_API_KEY")
+    if tts_provider == "elevenlabs" and eleven_key in ("", "replace_me"):
+        raise ConfigError("ELEVEN_API_KEY is required when VOICE_TTS_PROVIDER=elevenlabs")
     return ModelSettings(
+        tts_provider=tts_provider,
+        elevenlabs_api_key=eleven_key,
+        elevenlabs_voice_id=_env(env, "ELEVENLABS_VOICE_ID", defaults.elevenlabs_voice_id),
+        elevenlabs_model=_env(env, "ELEVENLABS_MODEL", defaults.elevenlabs_model),
         mode=mode,  # type: ignore[arg-type]
         voice_provider=provider,  # type: ignore[arg-type]
         google_api_key=google_key,
