@@ -1,10 +1,12 @@
+import pytest
 from livekit.agents import AgentSession
 
 from voice_agent.config import TurnSettings
 from voice_agent.infrastructure.providers import turn_handling
 
 
-def test_session_accepts_dynamic_endpointing_and_non_speculative_tools():
+@pytest.mark.asyncio
+async def test_session_accepts_dynamic_endpointing_and_non_speculative_tools():
     options = turn_handling(TurnSettings(detector="vad"))
     assert options["endpointing"]["mode"] == "dynamic"
     assert options["interruption"]["resume_false_interruption"]

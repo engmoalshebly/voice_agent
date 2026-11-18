@@ -115,11 +115,14 @@ function panelPosition(appearance: Appearance): Record<string, string> {
 interface Elements {
   panel: HTMLElement; title: HTMLElement; dot: HTMLElement; state: HTMLElement; orb: HTMLElement; phase: HTMLElement;
   hint: HTMLElement; play: HTMLElement; error: HTMLElement; again: HTMLElement; transcript: HTMLElement;
-  mute: HTMLElement; hangup: HTMLElement; close: HTMLElement; footer: HTMLElement;
+  handoff: HTMLButtonElement; chat: HTMLFormElement; chatInput: HTMLInputElement; mute: HTMLElement; hangup: HTMLElement; close: HTMLElement; footer: HTMLElement;
 }
 
 class Call {
   private room: Room | null = null;
+  private callToken = '';
+  private chatSocket: WebSocket | null = null;
+  private chatMode = false;
   private readonly root: ShadowRoot;
   private readonly host: HTMLElement;
   private readonly el: Elements;
@@ -158,15 +161,29 @@ class Call {
         <button class="round mute" type="button" aria-pressed="false" aria-label="كتم الميكروفون">${ICONS.mic}</button>
         <button class="round hangup" type="button" aria-label="إنهاء المكالمة">${ICONS.end}</button>
       </footer>
+      <button class="handoff again" type="button" hidden>متابعة مع موظف بالدردشة</button>
+      <form class="chat" hidden><label class="muted" for="voice-chat-text">رسالتك للموظف</label><div style="display:flex;gap:8px"><input id="voice-chat-text" maxlength="4000" autocomplete="off" required style="min-width:0;flex:1;padding:8px;border:1px solid #cbd5e1;border-radius:8px"/><button class="again" type="submit">إرسال</button></div></form>
       <div class="powered">مدعوم بواسطة DarAI</div>`;
     this.root.append(style, panel);
     const q = (selector: string) => panel.querySelector(selector) as HTMLElement;
     this.el = {
       panel, title: q('.title'), dot: q('.dot'), state: q('.state'), orb: q('.orb'), phase: q('.phase'),
       hint: q('.hint'), play: q('.play'), error: q('.error'), again: q('.again'), transcript: q('.transcript'),
+      handoff: q('.handoff') as HTMLButtonElement, chat: q('.chat') as HTMLFormElement, chatInput: q('#voice-chat-text') as HTMLInputElement,
       mute: q('.mute'), hangup: q('.hangup'), close: q('.close'), footer: q('footer'),
     };
     this.el.title.textContent = a.title;
+    this.el.handoff.style.margin = '0 16px 12px';
+    this.el.chat.style.padding = '12px 16px';
+    this.el.handoff.addEventListener('click', () => void this.handoff());
+    this.el.chat.addEventListener('submit', event => {
+      event.preventDefault();
+      const text = this.el.chatInput.value.trim();
+      if (!text || this.chatSocket?.readyState !== WebSocket.OPEN) return;
+      this.chatSocket.send(JSON.stringify({ event: 'message.send', id: crypto.randomUUID(), payload: { type: 'text', text } }));
+      this.addLine('caller', text);
+      this.el.chatInput.value = '';
+    });
     this.el.close.addEventListener('click', () => void this.close());
     this.el.hangup.addEventListener('click', () => void this.end());
     this.el.mute.addEventListener('click', () => void this.toggleMute());
@@ -209,13 +226,19 @@ class Call {
   async start(): Promise<void> {
     const { gateway, channelId } = this.options;
     try {
+      const storageKey = `darai_voice_visitor:${channelId}`;
+      let visitorKey: string | null = null;
+      try { visitorKey = localStorage.getItem(storageKey); } catch { /* private mode */ }
       const widget = await postJson(`${gateway}/ws/token`, {
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cId: channelId, platform: 'webchat' }),
+        body: JSON.stringify({ cId: channelId, visitor_key: visitorKey }),
       }, 'token');
       if (!widget?.token) throw new StepError('token');
+      if (widget.visitorKey) { try { localStorage.setItem(storageKey, widget.visitorKey); } catch { /* private mode */ } }
       const call = await postJson(`${gateway}/ws/voice/token`, { headers: { Authorization: `Bearer ${widget.token}` } }, 'token');
       if (this.closed) return;
+      this.callToken = call.callToken || '';
+      this.el.handoff.hidden = !this.callToken;
 
       const room = new Room({
         adaptiveStream: true,
@@ -234,7 +257,7 @@ class Call {
         .on(RoomEvent.ParticipantConnected, (participant: Participant) => this.watchAgent(participant))
         .on(RoomEvent.ParticipantAttributesChanged, (_changed: Record<string, string>, participant: Participant) => this.watchAgent(participant))
         .on(RoomEvent.AudioPlaybackStatusChanged, () => { this.el.play.hidden = room.canPlaybackAudio; })
-        .on(RoomEvent.Disconnected, () => { if (!this.closed) this.setPhase('ended'); });
+        .on(RoomEvent.Disconnected, () => { if (!this.closed && !this.chatMode) this.setPhase('ended'); });
       room.registerTextStreamHandler('lk.transcription', async (reader: TextStreamReader, info: { identity: string }) => {
         const text = await reader.readAll();
         if (reader.info.attributes?.['lk.transcription_final'] === 'false') return;
@@ -267,10 +290,52 @@ class Call {
     const state = participant.attributes?.['lk.agent.state'];
     if (!state && participant.identity !== this.agentIdentity) return;
     this.agentIdentity = participant.identity;
+    if (this.chatMode) return;
     if (this.phase === 'ended' || this.phase === 'error') return;
     if (state === 'speaking') this.setPhase('speaking');
     else if (state === 'thinking') this.setPhase('thinking');
     else this.setPhase('listening');
+  }
+
+  private async handoff(): Promise<void> {
+    if (!this.callToken || this.chatMode) return;
+    this.el.handoff.disabled = true;
+    try {
+      const info = await postJson(`${this.options.gateway}/ws/voice/handoff`, {
+        headers: { Authorization: `Bearer ${this.callToken}` },
+      }, 'call');
+      this.chatMode = true;
+      await this.disconnect();
+      this.setPhase('ended');
+      this.el.phase.textContent = 'متابعة بالدردشة';
+      this.el.state.textContent = 'في انتظار رد الموظف';
+      this.el.again.hidden = true;
+      this.el.handoff.hidden = true;
+      this.el.transcript.hidden = false;
+      this.el.chat.hidden = false;
+      const url = new URL(`${this.options.gateway}/ws/ws`);
+      url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+      url.search = new URLSearchParams({ platform: 'voice', account_id: info.accountId, sender_id: info.senderId, ticket: info.wsTicket }).toString();
+      this.chatSocket = new WebSocket(url);
+      this.chatSocket.onopen = () => { this.el.chatInput.focus(); };
+      this.chatSocket.onmessage = event => {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.event === 'message.new' && message.payload?.text) this.addLine('agent', message.payload.text);
+          if (message.event === 'system.error') {
+            this.el.error.textContent = 'تعذّر إرسال الرسالة. يرجى المحاولة مجددًا.';
+            this.el.error.hidden = false;
+          }
+        } catch { /* ignore unsupported protocol messages */ }
+      };
+      this.chatSocket.onclose = () => {
+        if (!this.closed) { this.el.state.textContent = 'انقطع اتصال الدردشة؛ أعد فتح المساعد للمتابعة'; this.el.chat.hidden = true; }
+      };
+    } catch {
+      this.el.error.textContent = 'تعذّر التحويل الآن. تحدث مع المساعد أولًا ثم حاول مجددًا.';
+      this.el.error.hidden = false;
+      this.el.handoff.disabled = false;
+    }
   }
 
   private async toggleMute(): Promise<void> {
@@ -305,6 +370,7 @@ class Call {
 
   async close(): Promise<void> {
     this.closed = true;
+    this.chatSocket?.close();
     await this.disconnect();
     this.host.remove();
     this.options.onClose();
