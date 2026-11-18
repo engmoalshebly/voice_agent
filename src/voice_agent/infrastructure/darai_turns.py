@@ -115,11 +115,17 @@ class DaraiTurnClient:
             raise DaraiTurnError("DarAI turn timed out") from exc
         raise DaraiTurnError("DarAI closed the turn without an end")
 
+    async def measurement(self, visitor_token: str, body: dict) -> None:
+        async with self._http().post(self._settings.url + "/ws/voice/measurements", json=body,
+                headers={"Authorization": f"Bearer {visitor_token}", "X-Voice-Worker-Key": self._settings.worker_key},
+                timeout=aiohttp.ClientTimeout(total=8)) as response:
+            if response.status != 200:
+                raise DaraiTurnError("Voice measurement refused", response.status)
+
     async def session(self, visitor_token: str) -> CallSession:
         """Fetch the call's greeting and listening hints once, at the start.
 
-        Never raises: a call must start with neutral defaults rather than
-        not at all.
+        Reject unavailable runtime so calls cannot bypass admission policy.
         """
         headers = {"Authorization": f"Bearer {visitor_token}", "X-Voice-Worker-Key": self._settings.worker_key}
         try:
@@ -128,12 +134,12 @@ class DaraiTurnClient:
                 timeout=aiohttp.ClientTimeout(total=3.0, connect=self._settings.connect_timeout),
             ) as response:
                 if response.status != 200:
-                    log.warning("DarAI call session unavailable (%s)", response.status)
-                    return CallSession()
+                    raise DaraiTurnError("Voice session refused", response.status)
                 data = await response.json()
+        except DaraiTurnError:
+            raise
         except Exception as exc:
-            log.warning("DarAI call session unavailable (%s)", type(exc).__name__)
-            return CallSession()
+            raise DaraiTurnError("Voice session unavailable") from exc
         if not isinstance(data, dict):
             return CallSession()
         hints = data.get("stt_hints") if isinstance(data.get("stt_hints"), list) else []
@@ -151,6 +157,14 @@ class DaraiTurnClient:
             max_call_seconds=float(seconds) if isinstance(seconds, (int, float)) and seconds >= 30 else None,
             filler_enabled=voice.get("filler_enabled") is not False,
         )
+
+    async def call_event(self, visitor_token: str, event: str, reason: str = "") -> None:
+        headers={"Authorization":f"Bearer {visitor_token}","X-Voice-Worker-Key":self._settings.worker_key}
+        async with self._http().post(self._settings.url+"/ws/voice/call-event",
+                json={"event":event,"reason":reason},headers=headers,
+                timeout=aiohttp.ClientTimeout(total=8)) as response:
+            if response.status != 200:
+                raise DaraiTurnError("Call lifecycle could not be recorded",response.status)
 
     async def close(self) -> None:
         if self._session is not None and self._owns_session:

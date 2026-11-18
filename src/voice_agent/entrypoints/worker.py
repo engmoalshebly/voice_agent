@@ -168,7 +168,13 @@ async def _darai_session(ctx: agents.JobContext, env, models, turns) -> None:
 
     phrases = DEFAULT_PHRASES
     client = DaraiTurnClient(gateway)
-    call = await client.session(visitor_token)   # who this call speaks for; never raises
+    try:
+        call = await client.session(visitor_token)
+    except Exception:
+        keys.cancel()
+        await client.close()
+        ctx.shutdown(reason="voice session unavailable")
+        return
     models = with_keys(models, await keys)       # never raises
     stt, tts = providers.pipeline_speech(
         models, stt_prompt=providers.stt_prompt_for(call.organization, call.stt_hints),
@@ -181,6 +187,27 @@ async def _darai_session(ctx: agents.JobContext, env, models, turns) -> None:
         turn_handling=providers.turn_handling(turns),
         user_away_timeout=turns.away_timeout,
     )
+    measurement_tasks: set[asyncio.Task] = set()
+    from ..infrastructure.usage import speech_measurement
+
+    async def send_measurement(payload):
+        for attempt in range(3):
+            try:
+                await client.measurement(visitor_token, payload)
+                return
+            except Exception:
+                if attempt < 2:
+                    await asyncio.sleep(0.2 * (attempt + 1))
+        log.warning("speech measurement unavailable", extra={"room": ctx.room.name})
+
+    @session.on("metrics_collected")
+    def collect_measurement(event: MetricsCollectedEvent):
+        payload = speech_measurement(event.metrics)
+        if payload:
+            task = asyncio.create_task(send_measurement(payload))
+            measurement_tasks.add(task)
+            task.add_done_callback(measurement_tasks.discard)
+
     away_said = False
 
     @session.on("user_state_changed")
@@ -195,8 +222,18 @@ async def _darai_session(ctx: agents.JobContext, env, models, turns) -> None:
     # The assistant's own limit, never above the worker's.
     max_call_seconds = min(gateway.max_call_seconds, call.max_call_seconds or gateway.max_call_seconds)
 
+    end_reason = "worker_shutdown"
+
+    @ctx.room.on("participant_disconnected")
+    def caller_disconnected(left):
+        nonlocal end_reason
+        if left.identity == participant.identity and end_reason != 'time_limit':
+            end_reason = 'caller_hangup'
+
     async def _limit() -> None:
+        nonlocal end_reason
         await asyncio.sleep(max_call_seconds)
+        end_reason = "time_limit"
         log.info("call reached its time limit", extra={"room": ctx.room.name})
         await session.say(phrases.call_limit, allow_interruptions=False)
         ctx.shutdown(reason="call time limit")
@@ -206,12 +243,27 @@ async def _darai_session(ctx: agents.JobContext, env, models, turns) -> None:
     async def _cleanup() -> None:
         limit.cancel()
         await asyncio.gather(limit, return_exceptions=True)
+        for attempt in range(3):
+            try:
+                await client.call_event(visitor_token,"ended",end_reason)
+                break
+            except Exception:
+                log.warning("call end ledger update failed", extra={"room":ctx.room.name})
+                if attempt < 2: await asyncio.sleep(0.2 * (attempt + 1))
+        if measurement_tasks:
+            await asyncio.gather(*tuple(measurement_tasks), return_exceptions=True)
         await client.close()
 
     _log_metrics(session, ctx.room.name)
     ctx.add_shutdown_callback(_cleanup)
     log.info("voice session starting (darai mode)", extra={"room": ctx.room.name})
-    await session.start(room=ctx.room, agent=Agent(instructions=""))
+    try:
+        await client.call_event(visitor_token,"connected")
+        await session.start(room=ctx.room, agent=Agent(instructions=""))
+    except Exception:
+        end_reason = "connection_failed"
+        ctx.shutdown(reason="voice call startup failed")
+        return
     # The welcome message the tenant wrote for this widget, so the call opens
     # the way the chat does.
     session.say(call.greeting or phrases.neutral_greeting)

@@ -354,12 +354,13 @@ async def test_the_session_brings_the_greeting_and_the_names_to_listen_for():
     assert seen["Authorization"] == "Bearer visitor-jwt" and seen["X-Voice-Worker-Key"] == "wk"
 
 
-async def test_a_missing_session_never_stops_a_call():
-    from voice_agent.infrastructure.darai_turns import CallSession
+async def test_an_unavailable_session_fails_closed_before_speech():
+    from voice_agent.infrastructure.darai_turns import DaraiTurnError
 
     client = DaraiTurnClient(GatewaySettings(url="http://127.0.0.1:9", worker_key="wk", connect_timeout=1))
     try:
-        assert await client.session("t") == CallSession()
+        with pytest.raises(DaraiTurnError, match="unavailable"):
+            await client.session("t")
     finally:
         await client.close()
 
