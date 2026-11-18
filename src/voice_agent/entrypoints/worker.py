@@ -6,6 +6,7 @@ Usage: ``voice-agent dev`` / ``voice-agent start`` / ``voice-agent console``.
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 import logging
 import os
 from functools import partial
@@ -223,12 +224,31 @@ async def _darai_session(ctx: agents.JobContext, env, models, turns) -> None:
     max_call_seconds = min(gateway.max_call_seconds, call.max_call_seconds or gateway.max_call_seconds)
 
     end_reason = "worker_shutdown"
+    ended: dict[str, Any] = {"sent": False, "task": None}
+
+    async def _report_end() -> None:
+        """Settle the call in the ledger. The ledger timestamps the end on arrival, so
+        this must not wait for the job to shut down (~20 s after the caller left,
+        all of it billed). A repeat is a no-op there."""
+        if ended["sent"]:
+            return
+        for attempt in range(3):
+            try:
+                await client.call_event(visitor_token, "ended", end_reason)
+                ended["sent"] = True
+                return
+            except Exception:
+                log.warning("call end ledger update failed", extra={"room": ctx.room.name})
+                if attempt < 2:
+                    await asyncio.sleep(0.2 * (attempt + 1))
 
     @ctx.room.on("participant_disconnected")
     def caller_disconnected(left):
         nonlocal end_reason
         if left.identity == participant.identity and end_reason != 'time_limit':
             end_reason = 'caller_hangup'
+            if ended["task"] is None:
+                ended["task"] = asyncio.create_task(_report_end())
 
     async def _limit() -> None:
         nonlocal end_reason
@@ -243,13 +263,9 @@ async def _darai_session(ctx: agents.JobContext, env, models, turns) -> None:
     async def _cleanup() -> None:
         limit.cancel()
         await asyncio.gather(limit, return_exceptions=True)
-        for attempt in range(3):
-            try:
-                await client.call_event(visitor_token,"ended",end_reason)
-                break
-            except Exception:
-                log.warning("call end ledger update failed", extra={"room":ctx.room.name})
-                if attempt < 2: await asyncio.sleep(0.2 * (attempt + 1))
+        if ended["task"] is not None:
+            await asyncio.gather(ended["task"], return_exceptions=True)
+        await _report_end()   # time limit, worker shutdown, or the hang-up report failed
         if measurement_tasks:
             await asyncio.gather(*tuple(measurement_tasks), return_exceptions=True)
         await client.close()
